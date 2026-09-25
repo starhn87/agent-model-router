@@ -1,0 +1,12 @@
+[
+  { "id": "copy-edit", "prompt": "다음 한국어 문장의 맞춤법과 띄어쓰기만 수정해줘: 오늘은 날씨가 참 좋내요.", "expectedTier": "fast", "contextTokens": 200 },
+  { "id": "short-summary", "prompt": "이 세 문장을 한 문장으로 간결하게 요약해줘: 출시했습니다. 오류를 고쳤습니다. 문의를 기다립니다.", "expectedTier": "fast", "contextTokens": 300 },
+  { "id": "simple-json", "prompt": "이 JSON의 키를 알파벳순으로 정렬해줘: {\"z\":1,\"a\":2,\"m\":3}", "expectedTier": "fast", "contextTokens": 100 },
+  { "id": "component-change", "prompt": "기존 React 컴포넌트의 버튼 문구와 간격을 바꾸고 타입 검사까지 해줘.", "expectedTier": "balanced", "contextTokens": 4000 },
+  { "id": "api-test", "prompt": "기존 HTTP 핸들러에 입력 검증을 추가하고 성공 및 오류 케이스를 테스트해줘.", "expectedTier": "balanced", "contextTokens": 6000 },
+  { "id": "design-tradeoff", "prompt": "검색 결과 정렬을 관련성과 거리 중 무엇에 우선할지 장단점을 비교하고 기본값을 제안해줘.", "expectedTier": "balanced", "contextTokens": 3000 },
+  { "id": "race-condition", "prompt": "백그라운드 동기화와 낙관적 업데이트가 충돌해 데이터가 간헐적으로 사라진다. 여러 저장소와 네트워크 재시도 로직을 조사해 원인과 안전한 수정안을 구현해줘.", "expectedTier": "strong", "contextTokens": 20000 },
+  { "id": "migration-design", "prompt": "운영 중인 서비스의 데이터 모델을 바꾸면서 구버전 앱과 신버전 앱을 동시에 지원해야 한다. 무중단 마이그레이션과 롤백 계획을 설계해줘.", "expectedTier": "strong", "contextTokens": 18000 },
+  { "id": "security-review", "prompt": "OAuth 계정 통합 경로에서 다른 사용자의 데이터에 접근할 수 있는지 위협 모델과 권한 검사를 점검하고 취약점이 있으면 수정해줘.", "expectedTier": "strong", "contextTokens": 12000 },
+  { "id": "performance-debug", "prompt": "지도 마커가 줌 조작 중 사라지고 앱이 멈춘다. 네이티브 브리지, 이미지 캡처, 렌더링 부하를 구분해 측정하고 원인을 재현해줘.", "expectedTier": "strong", "contextTokens": 22000 }
+]
