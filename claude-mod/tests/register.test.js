@@ -88,7 +88,7 @@ test("skips sensitive prompts and leaves the session model on low confidence", a
   assert.equal(sensitive.requests.length, 0);
   assert.equal((await sensitive.step("turn-1")).sent.model, "claude-sonnet-5");
   assert.equal((await sensitive.step("turn-1", undefined, "Kept the session model.")).chunks[0].text,
-    "Kept the session model.");
+    "> ✳️ 선택 모델: claude-sonnet-5 · 요청 effort: medium\n\n---\n\nKept the session model.");
 
   const uncertain = harness({ confidence: 0.5 });
   await uncertain.start("turn-2", "Please implement this straightforward little change.");
@@ -128,6 +128,19 @@ test("first main-loop text announces the selected route once", async () => {
   assert.equal(next.chunks[0].text, "More text.");
   const subagent = await h.step("t", "agent-1", "Tool result.");
   assert.equal(subagent.chunks[0].text, "Tool result.");
+});
+
+test("short and skipped turns announce the session model and effort", async () => {
+  for (const prompt of ["안녕", "Please inspect the secret: abcdefghijklmnop"]) {
+    const h = harness();
+    await h.start("t", prompt);
+    assert.equal(h.requests.length, 0);
+    const step = await h.step("t", undefined, "Hello.");
+    assert.equal(step.sent.model, "claude-sonnet-5");
+    assert.equal(step.sent.effort, "medium");
+    assert.equal(step.chunks[0].text,
+      "> ✳️ 선택 모델: claude-sonnet-5 · 요청 effort: medium\n\n---\n\nHello.");
+  }
 });
 
 test("matching and dated API model IDs do not show a mismatch", async () => {

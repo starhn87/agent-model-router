@@ -160,7 +160,7 @@ export function register(on) {
       ? { ...e, ...(route.model ? { model: route.model } : {}), ...(route.effort ? { effort: route.effort } : {}) } : e;
     if (route) route.requestedEffort = request.effort;
     for await (const chunk of next(request)) {
-      if (route && (route.model || route.effort) && footerEnabled && !route.announced && chunk.kind === "text" && chunk.text) {
+      if (route && footerEnabled && !route.announced && chunk.kind === "text" && chunk.text) {
         route.announced = true;
         const model = typeof request.model === "string" && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(request.model)
           ? request.model : "확인 불가";
