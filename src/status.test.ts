@@ -10,7 +10,7 @@ import { recentStatusFromMetrics, renderStatusPage } from "./status.js";
 test("status pairs a routing decision with the completed model and escapes untrusted values", () => {
   const content = [
     { at: "2026-09-25T08:00:00Z", requestId: "request-1", result: "routed", model: "gpt-6-luna",
-      effort: "low", recommendedTier: "fast", confidence: 1, prompt: "PRIVATE USER PROMPT" },
+      effort: "low", recommendedEffort: "medium", recommendedTier: "fast", confidence: 1, prompt: "PRIVATE USER PROMPT" },
     { at: "2026-09-25T08:00:01Z", requestId: "request-1", kind: "response", requestedModel: "gpt-6-luna",
       requestedEffort: "low", servedModel: "gpt-6-luna" },
     { at: "2026-09-25T08:00:02Z", requestId: "request-2", kind: "response", requestedModel: "<script>",
@@ -20,9 +20,13 @@ test("status pairs a routing decision with the completed model and escapes untru
   assert.equal(entries.length, 2);
   assert.equal(entries[1]?.servedModel, "gpt-6-luna");
   assert.equal(entries[1]?.requestedEffort, "low");
+  assert.equal(entries[1]?.recommendedEffort, "medium");
   const html = renderStatusPage(entries, true);
   assert.match(html, /gpt-6-luna/);
   assert.match(html, /&lt;script&gt;/);
+  assert.match(html, /Jev 추천 effort/);
+  assert.match(html, /요청 모델: &lt;script&gt;/);
+  assert.match(html, /≠/);
   assert.doesNotMatch(html, /PRIVATE USER PROMPT|<script>/);
 });
 
@@ -32,7 +36,7 @@ test("local status endpoint shows completed routing without contacting the model
   const file = join(directory, "metrics.jsonl");
   writeFileSync(file, [
     JSON.stringify({ at: "2026-09-25T08:00:00Z", requestId: "request-1", result: "routed",
-      model: "gpt-6-luna", effort: "low", recommendedTier: "fast" }),
+      model: "gpt-6-luna", effort: "low", recommendedEffort: "medium", recommendedTier: "fast" }),
     JSON.stringify({ at: "2026-09-25T08:00:01Z", requestId: "request-1", kind: "response",
       requestedModel: "gpt-6-luna", requestedEffort: "low", servedModel: "gpt-6-luna" }),
   ].join("\n") + "\n");
@@ -45,5 +49,5 @@ test("local status endpoint shows completed routing without contacting the model
   assert.match(await page.text(), /실제 응답 모델/);
   const json = await fetch(`http://127.0.0.1:${proxy.port}/status.json`);
   assert.deepEqual(await json.json(), { entries: [{ at: "2026-09-25T08:00:01Z", result: "routed",
-    tier: "fast", requestedModel: "gpt-6-luna", requestedEffort: "low", servedModel: "gpt-6-luna" }] });
+    tier: "fast", requestedModel: "gpt-6-luna", requestedEffort: "low", recommendedEffort: "medium", servedModel: "gpt-6-luna" }] });
 });

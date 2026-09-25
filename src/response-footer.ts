@@ -9,13 +9,16 @@ function lastIndex(items: unknown[], predicate: (value: unknown) => boolean): nu
   return -1;
 }
 
-export function responseFooter(model: unknown, effort?: string): string {
-  return `\n\n— 모델: ${safeModel(model) ? model : "확인 불가"} · 요청 effort: ${effort && /^[a-z]+$/.test(effort) ? effort : "기본값"}`;
+export function responseFooter(model: unknown, effort?: string, requestedModel?: string): string {
+  const mismatch = safeModel(model) && safeModel(requestedModel) &&
+    model !== requestedModel && !model.startsWith(`${requestedModel}-`)
+    ? ` · 요청 모델: ${requestedModel} ≠` : "";
+  return `\n\n— 모델: ${safeModel(model) ? model : "확인 불가"} · 요청 effort: ${effort && /^[a-z]+$/.test(effort) ? effort : "기본값"}${mismatch}`;
 }
 
 const FOOTER_START = "— 모델: ";
 const FOOTER_BOUNDARY = `\n\n${FOOTER_START}`;
-const FOOTER_END = /(?:^|\r?\n\r?\n)— 모델: (?:[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}|확인 불가) · 요청 effort: (?:[a-z]+|기본값)[ \t]*(?:\r?\n)*$/;
+const FOOTER_END = /(?:^|\r?\n\r?\n)— 모델: (?:[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}|확인 불가) · 요청 effort: (?:[a-z]+|기본값)(?: · 요청 모델: [A-Za-z0-9][A-Za-z0-9._:/-]{0,127} ≠)?[ \t]*(?:\r?\n)*$/;
 
 export function stripResponseFooters(text: string): string {
   for (;;) {
@@ -97,7 +100,7 @@ export class ResponseFooter extends Transform {
   private commentary = new Set<number>();
   private format: "sse" | "json" | "unknown";
 
-  constructor(contentType?: string, private readonly effort?: string) {
+  constructor(contentType?: string, private readonly effort?: string, private readonly requestedModel?: string) {
     super();
     this.format = contentType?.includes("application/json") ? "json" : contentType?.includes("text/event-stream") ? "sse" : "unknown";
   }
@@ -187,7 +190,7 @@ export class ResponseFooter extends Transform {
           part.output_index === selected.outputIndex && part.content_index === selected.contentIndex;
       });
       if (selected && done) {
-        const suffix = responseFooter(response.model, this.effort);
+        const suffix = responseFooter(response.model, this.effort, this.requestedModel);
         for (const frame of this.pending) {
           const part = parseFrame(frame);
           if (!part) { this.push(frame); continue; }
@@ -263,7 +266,7 @@ export class ResponseFooter extends Transform {
         const response = JSON.parse(this.buffer.toString("utf8"));
         const selected = record(response) ? target(response) : null;
         if (selected) {
-          selected.part.text = stripResponseFooters(selected.part.text) + responseFooter(response.model, this.effort);
+          selected.part.text = stripResponseFooters(selected.part.text) + responseFooter(response.model, this.effort, this.requestedModel);
           this.buffer = Buffer.from(JSON.stringify(response));
         }
       } catch { /* Unknown responses are forwarded unchanged. */ }

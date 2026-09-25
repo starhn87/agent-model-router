@@ -259,6 +259,7 @@ test("metrics sink failures cannot alter routing or interrupt completed response
 
 test("auto footer reports served model and effort and preserves observation metadata", async (context) => {
   const observations: ResponseObservationEvent[] = [];
+  const decisions: DecisionEvent[] = [];
   const proxy = await harness(context, (_request, response) => {
     const body = JSON.stringify({ status: "completed", model: "gpt-6-sol", output: [
       { type: "message", role: "assistant", phase: "final_answer", content: [{ type: "output_text", text: "Hello" }] },
@@ -267,12 +268,15 @@ test("auto footer reports served model and effort and preserves observation meta
     response.end(body);
   }, {
     settings: defaultSettings("auto"), classify: async () => ({ tier: "fast", confidence: 1, effortScore: 0 }),
+    onDecision: (event) => decisions.push(event),
     onObservation: (event) => observations.push(event),
   });
   const response = await fetch(`${proxy.url}/responses`, { method: "POST", body: JSON.stringify(requestBody), signal: proxy.signal });
   assert.equal(response.headers.has("content-length"), false);
   assert.equal(response.headers.has("etag"), false);
-  assert.match((await response.json() as any).output[0].content[0].text, /Hello\n\n— 모델: gpt-6-sol · 요청 effort: low$/);
+  assert.match((await response.json() as any).output[0].content[0].text,
+    /Hello\n\n— 모델: gpt-6-sol · 요청 effort: low · 요청 모델: gpt-6-luna ≠$/);
+  assert.equal(decisions[0]?.recommendedEffort, "low");
   assert.equal(observations[0]?.servedModel, "gpt-6-sol");
   assert.equal(observations[0]?.requestedModel, "gpt-6-luna");
 });

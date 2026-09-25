@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { askJev } from "./jev.js";
 import { codexSessionKey, estimateContextTokens, latestUserTurn, type CodexBody } from "./codex-request.js";
 import { CodexResponseObserver, type ObservedResponse } from "./codex-response.js";
-import { chooseModel, fallbackModel, localRoute } from "./policy.js";
+import { chooseModel, effortFromScore, fallbackModel, localRoute } from "./policy.js";
 import { readRecentStatus, renderStatusPage } from "./status.js";
 import { allowsResponseFooter, ResponseFooter, withoutResponseFooters } from "./response-footer.js";
 import type { DecisionEvent, ResponseObservationEvent, RouteChoice, RouteQuery, RouteResult, RouterSettings } from "./types.js";
@@ -171,7 +171,8 @@ export class CodexRouter {
           if (settings.autoEffort) selectedEffort = result.effort;
           this.report({ result: result.model === currentModel ? "kept" : "routed", model: result.model,
             effort: this.effectiveEffort(result.model, selectedEffort),
-            recommendedTier: result.tier, confidence: result.confidence, latencyMs: Date.now() - started,
+            recommendedEffort: effortFromScore(choice.effortScore), recommendedTier: result.tier,
+            confidence: result.confidence, latencyMs: Date.now() - started,
             jevInputTokens: choice.inputTokens, reason: result.reason }, requestId);
         } catch {
           result = { model: fallbackModel(currentModel, settings, this.allowedModels()), reason: "jev-unavailable" };
@@ -319,7 +320,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
       response.writeHead(upstreamResponse.statusCode ?? 502, responseHeaders);
       if (rewrite) {
-        const footer = new ResponseFooter(contentType, requestedEffort);
+        const footer = new ResponseFooter(contentType, requestedEffort, requestedModel);
         footer.on("error", () => respondError(response, 502, "response stream unavailable"));
         response.on("close", () => footer.destroy());
         upstreamResponse.pipe(footer).pipe(response);

@@ -76,6 +76,7 @@ test("routes every main-loop step in one turn and records the served model", asy
   assert.equal((await h.step("turn-1", "agent-1")).sent.model, "claude-sonnet-5");
   assert.equal((await h.step("turn-1", "agent-1")).sent.effort, "medium");
   assert.match(h.status(), /API served claude-haiku-4-5/);
+  assert.match(h.status(), /Jev recommended effort xhigh; requested effort xhigh/);
   assert.match(h.status(), /requested effort xhigh/);
   assert.equal(h.registered[0].name, "amr-route");
 });
@@ -91,6 +92,7 @@ test("skips sensitive prompts and leaves the session model on low confidence", a
   assert.equal(uncertain.requests.length, 1);
   assert.equal((await uncertain.step("turn-2")).sent.model, "claude-sonnet-5");
   assert.equal((await uncertain.step("turn-2")).sent.effort, "xhigh");
+  assert.match(uncertain.status(), /Jev recommended effort xhigh; requested effort xhigh/);
 });
 
 test("maps a strong decision to Opus and can be disabled for a new session", async () => {
@@ -109,8 +111,18 @@ test("completion displays actual model and requested effort once, without replac
   const h = harness();
   await h.start("t", "Fix the spelling of this short example sentence.");
   await h.step("t");
-  assert.equal((await h.complete("t")).text, "모델: claude-served · 요청 effort: xhigh");
+  assert.equal((await h.complete("t")).text, "모델: claude-served · 요청 effort: xhigh · 요청 모델: claude-haiku-4-5 ≠");
   assert.equal((await h.complete("t")).text, "Answer");
+});
+
+test("matching and dated API model IDs do not show a mismatch", async () => {
+  for (const model of ["claude-haiku-4-5", "claude-haiku-4-5-20260901"]) {
+    const h = harness();
+    await h.start("t", "Fix the spelling of this short example sentence.");
+    await h.step("t");
+    assert.equal((await h.complete("t", { usage: { model } })).text,
+      `모델: ${model} · 요청 effort: xhigh`);
+  }
 });
 
 test("completion leaves subagents, interruptions, disabled routing and footer opt-out alone", async () => {

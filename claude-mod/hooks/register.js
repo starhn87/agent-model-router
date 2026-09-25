@@ -116,9 +116,12 @@ function statusOf(enabled, last) {
   if (!enabled) return "Agent Model Router: off (set AMR_CLAUDE_AUTO=1 and restart Claude Code).";
   if (!last) return "Agent Model Router: on; no user turn classified yet.";
   const picked = last.model ? `${last.tier} → ${last.model} (${last.confidence})` : last.reason;
-  const effort = last.effort ? `; requested effort ${last.effort}` : "";
-  const served = last.servedModel ? `; API served ${last.servedModel}` : "";
-  return `Agent Model Router: ${picked}${effort}${served}.`;
+  const recommended = last.effort ? `; Jev recommended effort ${last.effort}` : "";
+  const requested = last.requestedEffort ? `; requested effort ${last.requestedEffort}` : "";
+  const mismatch = last.model && last.servedModel && last.servedModel !== last.model &&
+    !last.servedModel.startsWith(`${last.model}-`) ? ` ≠ ${last.model}` : "";
+  const served = last.servedModel ? `; API served ${last.servedModel}${mismatch}` : "";
+  return `Agent Model Router: ${picked}${recommended}${requested}${served}.`;
 }
 
 export function register(on) {
@@ -176,7 +179,10 @@ export function register(on) {
     const label = typeof effort === "number" && Number.isFinite(effort) ? String(effort)
       : typeof effort === "string" && /^[a-z]+$/.test(effort) ? effort : "기본값";
     // turn.complete displays a synopsis beneath the answer without rewriting its transcript.
-    const footer = `모델: ${safeModel} · 요청 effort: ${label}`;
+    const mismatch = typeof route.model === "string" && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(route.model) &&
+      safeModel !== "확인 불가" && safeModel !== route.model &&
+      !safeModel.startsWith(`${route.model}-`) ? ` · 요청 모델: ${route.model} ≠` : "";
+    const footer = `모델: ${safeModel} · 요청 effort: ${label}${mismatch}`;
     return { ...result, text: result.text && result.text !== e.answer ? `${result.text}\n\n${footer}` : footer };
   });
 }

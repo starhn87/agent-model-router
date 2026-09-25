@@ -10,6 +10,7 @@ export type StatusEntry = {
   confidence?: number;
   requestedModel?: string;
   requestedEffort?: string;
+  recommendedEffort?: string;
   servedModel?: string;
 };
 
@@ -44,7 +45,8 @@ export function recentStatusFromMetrics(content: string): StatusEntry[] {
       entry = { ...previous, at, result, tier: text(event.recommendedTier),
         confidence: typeof event.confidence === "number" && Number.isFinite(event.confidence) ? event.confidence : undefined,
         requestedModel: text(event.model) ?? previous.requestedModel,
-        requestedEffort: text(event.effort) ?? previous.requestedEffort };
+        requestedEffort: text(event.effort) ?? previous.requestedEffort,
+        recommendedEffort: text(event.recommendedEffort) ?? previous.recommendedEffort };
     }
     entries.delete(id);
     entries.set(id, entry);
@@ -94,8 +96,11 @@ function displayTime(value: string): string {
 
 export function renderStatusPage(entries: StatusEntry[], hasMetricsFile: boolean): string {
   const latest = entries[0];
-  const rows = entries.map((entry) => `<tr><td>${displayTime(entry.at)}</td><td>${display(entry.servedModel, "응답 확인 대기")}</td>` +
-    `<td>${display(entry.requestedEffort)}</td><td>${display(entry.tier ?? entry.result)}</td></tr>`).join("");
+  const modelLabel = (entry: StatusEntry) => `${display(entry.servedModel, "응답 확인 대기")}${entry.servedModel && entry.requestedModel &&
+    entry.servedModel !== entry.requestedModel && !entry.servedModel.startsWith(`${entry.requestedModel}-`)
+    ? ` <span title="요청 모델: ${display(entry.requestedModel)}">≠</span>` : ""}`;
+  const rows = entries.map((entry) => `<tr><td>${displayTime(entry.at)}</td><td>${modelLabel(entry)}</td>` +
+    `<td>${display(entry.recommendedEffort)}</td><td>${display(entry.requestedEffort)}</td><td>${display(entry.tier ?? entry.result)}</td></tr>`).join("");
   const empty = hasMetricsFile ? "아직 관찰한 요청이 없습니다. 라우터 설정을 적용한 새 Codex 작업에서 메시지를 보내세요."
     : "상태 기록을 보려면 라우터를 --metrics FILE 옵션으로 시작하세요.";
   return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">` +
@@ -110,10 +115,11 @@ export function renderStatusPage(entries: StatusEntry[], hasMetricsFile: boolean
     `<p class="muted">화면 갱신: ${displayTime(new Date().toISOString())} · 마지막 라우터 기록: ${latest ? displayTime(latest.at) : "없음"}</p>` +
     `<p>새 메시지를 보냈는데 마지막 기록 시각이 바뀌지 않나요? 설정 변경 전에 만든 작업은 기존 공급자 연결을 유지할 수 있습니다. ` +
     `라우터 설정을 적용한 뒤 <strong>새 Codex 작업</strong>에서 Jev Auto를 선택하세요. 기존 작업의 모델만 바꿔도 연결은 바뀌지 않습니다.</p>` +
-    (latest ? `<div class="card"><div class="grid"><div><small>실제 응답 모델</small><div class="value">${display(latest.servedModel, "응답 확인 대기")}</div></div>` +
+    (latest ? `<div class="card"><div class="grid"><div><small>실제 응답 모델</small><div class="value">${modelLabel(latest)}</div></div>` +
       `<div><small>요청 effort</small><div class="value">${display(latest.requestedEffort)}</div></div></div>` +
       `<p>요청 모델: <strong>${display(latest.requestedModel)}</strong> · Jev 등급: <strong>${display(latest.tier)}</strong>` +
+      ` · Jev 추천 effort: <strong>${display(latest.recommendedEffort)}</strong>` +
       `${latest.confidence === undefined ? "" : ` · 신뢰도: <strong>${latest.confidence}</strong>`}</p></div>` : `<div class="card">${empty}</div>`) +
-    (rows ? `<h2>최근 요청</h2><table><thead><tr><th>시각</th><th>실제 응답 모델</th><th>요청 effort</th><th>라우팅</th></tr></thead>` +
+    (rows ? `<h2>최근 요청</h2><table><thead><tr><th>시각</th><th>실제 응답 모델</th><th>Jev 추천 effort</th><th>요청 effort</th><th>라우팅</th></tr></thead>` +
       `<tbody>${rows}</tbody></table>` : "") + `</body></html>`;
 }

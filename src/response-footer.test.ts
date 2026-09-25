@@ -111,6 +111,14 @@ test("CRLF, missing final newline and oversized unknown data are preserved or ha
   assert.equal(responseFooter("<bad>", "<bad>"), "\n\n— 모델: 확인 불가 · 요청 effort: 기본값");
 });
 
+test("footer marks only a confirmed model mismatch and removes old mismatch trailers", () => {
+  const mismatch = responseFooter("served-model", "low", "requested-model");
+  assert.equal(mismatch, "\n\n— 모델: served-model · 요청 effort: low · 요청 모델: requested-model ≠");
+  assert.equal(stripResponseFooters(`Answer${mismatch}`), "Answer");
+  assert.equal(responseFooter("requested-model-20260901", "low", "requested-model"),
+    "\n\n— 모델: requested-model-20260901 · 요청 effort: low");
+});
+
 test("model-written and repeated footers are replaced with one authoritative footer in every SSE view", async () => {
   const expected = `I have an apple.${responseFooter("served-model", "low")}`;
   for (const emptyOutput of [true, false]) {
