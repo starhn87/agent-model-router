@@ -6,9 +6,9 @@ Codex와 Claude Code에서 턴별 모델 선택을 시험하는 로컬 프로젝
 
 | 대상 | 현재 구현 | 실제 검증 |
 | --- | --- | --- |
-| Codex CLI | 기존 ChatGPT 로그인으로 로컬 프록시를 거쳐 `pass`·`force`·`shadow`·`auto` 실행 | 실제 Jev로 같은 대화의 `fast → balanced` 전환과 도구 사용 완료. 낮은 신뢰도에서는 모델 유지, 이미지 턴에서는 Jev 생략 확인. 저장된 판정 재생으로 `strong` 승급과 짧은 후속 지시의 모델 유지 확인 |
-| Codex 데스크톱 | 동일 프록시와 사용자 수준 설정 예시 제공 | 수정된 문맥 추정기로 실제 앱 `shadow`의 Jev `fast` 추천·기존 모델 유지 확인. 이어 제한적 `auto`에서 `gpt-6-luna` 전환과 응답 완료 확인. 원래 설정 복원 완료 |
-| Claude Code CLI·데스크톱 Code 탭 | 초기 접근 기능인 함수 훅 플러그인으로 주 턴의 모델 요청을 전환. 기존 `UserPromptSubmit` 관찰 훅도 선택 가능 | `sonnet` CLI 세션에서 모의 Jev 및 실제 Jev 판정 뒤 `haiku` 응답 메타데이터 확인. 사용자 범위 플러그인 설치 후 일반 CLI와 데스크톱 Code 탭의 공개 합성 세션에서도 `haiku` 응답 확인 |
+| Codex CLI | 기존 ChatGPT 로그인으로 로컬 프록시를 거쳐 `pass`·`force`·`shadow`·`auto` 실행 | 실제 Jev로 같은 대화의 `fast → balanced` 전환과 도구 사용 완료. 사용자 설정과 상시 로컬 서버를 연결한 공개 합성 CLI 턴에서도 `fast → gpt-6-luna` 전환 확인 |
+| Codex 데스크톱 | 동일 프록시와 사용자 수준 설정 제공 | 이전 제한 시험에서 앱의 `shadow` 추천과 `auto`의 `gpt-6-luna` 응답 완료 확인. 현재 사용자 설정을 상시 서버에 연결했으며 실행 중인 앱에는 재시작 후 반영됨 |
+| Claude Code CLI·데스크톱 Code 탭 | 초기 접근 기능인 함수 훅 플러그인으로 주 턴의 모델 요청을 전환. 기존 `UserPromptSubmit` 관찰 훅도 선택 가능 | 사용자 범위 플러그인 설치 후 새 CLI·데스크톱 Code 세션의 공개 합성 턴에서 실제 `claude-haiku-4-5` 응답 확인 |
 
 Claude 구독 세션을 가로채는 프록시는 만들지 않았습니다. Claude Code 내부의 [초기 접근 함수 훅](https://github.com/anthropics/claude-code/blob/main/mods/README.md)을 사용하므로 설치된 Claude Code 버전에 따라 동작이 바뀔 수 있습니다. Claude의 별도 API 게이트웨이는 구독 외 과금과 자격 증명이 필요하므로 이 프로젝트에서 자동 활성화하지 않습니다.
 
@@ -90,7 +90,7 @@ requires_openai_auth = true
 supports_websockets = false
 ```
 
-설정 변경 후 앱을 재시작해 공개 합성 문장 한 턴으로 `shadow` 기록을 확인합니다. `auto`는 그 연결과 분류 품질을 검증한 뒤 별도 시험에 사용하세요. 시험이 끝나면 백업한 설정 파일 전체를 복원하고 서버를 종료한 다음 앱을 다시 재시작합니다. 이 저장소의 데스크톱 시험도 같은 순서로 복원했으며 상시 연결은 설치하지 않았습니다.
+설정 변경 후 앱을 재시작해 공개 합성 문장 한 턴으로 `shadow` 기록을 확인합니다. `auto`는 그 연결과 분류 품질을 검증한 뒤 별도 시험에 사용하세요. 시험이 끝나면 백업한 설정 파일 전체를 복원하고 서버를 종료한 다음 앱을 다시 재시작합니다. 상시 사용하려면 로그인 시 서버가 자동으로 시작되도록 운영체제의 서비스 관리자에 등록하고 `/health`가 응답하는지 확인해야 합니다. 이 개발 머신에는 `auto`·기준 모델 `gpt-6-astra`·선택적 하향 전환 신뢰도 `0.9`로 로그인 시 시작하는 로컬 서버를 등록했습니다.
 
 서버 종료는 진행 중인 HTTP/SSE 연결도 취소합니다. 업스트림 응답이 도중에 끊기면 SSE 연결을 오류로 닫으며, 아직 응답을 보내지 않은 모델 목록 요청에는 원문 오류를 포함하지 않는 502를 반환합니다.
 
@@ -169,7 +169,7 @@ node dist/cli.js report .local/codex.jsonl
 - 자동 전환은 새 사용자 턴에서만 결정하고 도구 실행 후 이어지는 요청에는 같은 모델을 고정합니다.
 - Claude 함수 훅도 Jev를 사용자 턴당 한 번만 호출하고 그 턴의 주 에이전트 요청에 같은 모델을 적용합니다. 짧은 입력·명백한 비밀 문자열·낮은 신뢰도·오류에서는 세션 모델을 유지합니다. 첨부 이미지와 전체 대화 문맥의 크기는 아직 Claude 함수 훅에서 검사하지 않으므로, 민감한 작업이나 긴 문맥에서는 `AMR_CLAUDE_AUTO=0`으로 끄세요.
 - Codex 요청의 대화 ID로 모델 상태를 분리합니다. 대화 ID가 없으면 이전 요청의 모델 상태를 물려받지 않고 기준 모델에서 시작합니다.
-- 저장소는 Codex 전역 모델 설정이나 Claude 플러그인을 자동 설치하지 않습니다. 이 개발 머신에는 사용자 범위 Claude 플러그인과 함수 훅 환경 설정을 시험용으로 적용했습니다. 기존 `ANTHROPIC_API_KEY` 환경 변수가 Claude 구독 인증보다 우선되는 경우에는 [인증 우선순위 안내](https://support.claude.com/en/articles/12304248-manage-api-key-environment-variables-in-claude-code)를 확인하세요.
+- 저장소는 Codex 전역 모델 설정이나 Claude 플러그인을 자동 설치하지 않습니다. 이 개발 머신에는 사용자 범위 Claude 플러그인, Codex 사용자 설정, 로그인 시 실행되는 로컬 라우터를 별도로 설치했습니다. 기존 `ANTHROPIC_API_KEY` 환경 변수가 Claude 구독 인증보다 우선되는 경우에는 [인증 우선순위 안내](https://support.claude.com/en/articles/12304248-manage-api-key-environment-variables-in-claude-code)를 확인하세요.
 
 구체적인 단계별 통과 기준과 남은 검증은 [검증 계획](docs/validation-plan.md)에 있습니다.
 
