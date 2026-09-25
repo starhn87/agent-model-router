@@ -12,6 +12,7 @@ function fixture(t: TestContext) {
   const context: InstallContext = { home: join(dir, "home"), repo: join(dir, "repo space & test"), platform: "darwin", node: process.execPath,
     run: (command, args) => { calls.push([command, ...args]); } };
   mkdirSync(context.repo, { recursive: true });
+  mkdirSync(join(context.repo, "claude-mod/skills/agent-context-gates"), { recursive: true });
   writeFileSync(join(context.repo, ".env"), "TYPESAFE_API_KEY=synthetic-key\n");
   const put = (path: string, content: string) => { const file = join(context.home, path); mkdirSync(join(file, ".."), { recursive: true }); writeFileSync(file, content); };
   const get = (path: string) => readFileSync(join(context.home, path), "utf8");
@@ -60,12 +61,14 @@ test("Claude install is idempotent, stores private backups and removes cleanly",
   await install("claude", h.context);
   assert.equal(h.get(".agent-model-router/install.json"), firstState);
   assert.ok(lstatSync(join(h.context.home, ".claude/skills/agent-model-router")).isSymbolicLink());
+  assert.ok(lstatSync(join(h.context.home, ".claude/skills/agent-context-gates")).isSymbolicLink());
   assert.equal(lstatSync(join(h.context.home, ".agent-model-router/install.json")).mode & 0o777, 0o600);
   const settings = JSON.parse(h.get(".claude/settings.json")); settings.theme = "dark";
   h.put(".claude/settings.json", JSON.stringify(settings));
   uninstall("claude", h.context);
   assert.deepEqual(JSON.parse(h.get(".claude/settings.json")), { env: { OTHER: "preserved" }, theme: "dark" });
   assert.equal(existsSync(join(h.context.home, ".claude/skills/agent-model-router")), false);
+  assert.equal(existsSync(join(h.context.home, ".claude/skills/agent-context-gates")), false);
 });
 
 test("both install validates before mutations and handles an existing unrelated plugin safely", async (t) => {
@@ -93,6 +96,7 @@ test("both install runs service before redirecting Codex, and disable preserves 
   });
   await install("both", h.context);
   assert.match(h.get(".codex/config.toml"), /model_provider = "agent_router"/);
+  assert.ok(lstatSync(join(h.context.home, ".agents/skills/agent-context-gates")).isSymbolicLink());
   assert.match(servicePlist(h.context), /repo space &amp; test/);
   assert.match(await doctor(h.context), /연결됨/);
   h.put(".codex/config.toml", `${h.get(".codex/config.toml")}\n[unrelated]\nvalue = 42\n`);
@@ -100,6 +104,27 @@ test("both install runs service before redirecting Codex, and disable preserves 
   assert.match(h.get(".codex/config.toml"), /\[unrelated\]\nvalue = 42/);
   assert.equal(h.get(".codex/config.toml").includes("agent_router"), false);
   assert.equal(existsSync(join(h.context.home, "Library/LaunchAgents/com.agent-model-router.codex.plist")), false);
+  assert.equal(existsSync(join(h.context.home, ".agents/skills/agent-context-gates")), false);
+});
+
+test("existing Codex setup gains the new skill link on reinstall", async (t) => {
+  const h = fixture(t);
+  let started = false;
+  h.context.run = (_command, args) => { if (args[0] === "bootstrap") started = true; };
+  t.mock.method(globalThis, "fetch", async () => {
+    if (!started) throw new Error("offline");
+    return new Response('{"service":"agent-model-router","status":"ok","responseFooter":true}');
+  });
+  await install("codex", h.context);
+  const link = join(h.context.home, ".agents/skills/agent-context-gates");
+  rmSync(link);
+  const state = JSON.parse(h.get(".agent-model-router/install.json"));
+  delete state.codex.skillLinkExisted;
+  h.put(".agent-model-router/install.json", JSON.stringify(state));
+  await install("codex", h.context);
+  assert.ok(lstatSync(link).isSymbolicLink());
+  uninstall("codex", h.context);
+  assert.equal(existsSync(link), false);
 });
 
 test("a failed service start rolls back configuration and leaves Claude untouched", async (t) => {

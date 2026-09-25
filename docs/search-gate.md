@@ -16,4 +16,4 @@ node dist/cli.js search-report .local/search.jsonl
 node dist/cli.js search-evaluate fixtures/search-evaluation-example.json
 ```
 
-이 평가는 **검색 결과 선택의 품질**만 다룹니다. 최종 답의 정확성과 전체 작업 시간은 별도의 동일 작업 비교가 필요합니다. 예제의 질문과 결과는 합성 데이터입니다. 현재 Codex·Claude Code의 내장 검색을 자동으로 가로채지는 않습니다.
+이 평가는 **검색 결과 선택의 품질**만 다룹니다. 최종 답의 정확성과 전체 작업 시간은 별도의 동일 작업 비교가 필요합니다. 예제의 질문과 결과는 합성 데이터입니다. 설치된 `agent-context-gates` 스킬은 검색 결과가 많은 경우 에이전트에게 이 명령을 호출하도록 안내합니다. 내장 검색을 자동으로 가로채지는 않습니다.

@@ -1,6 +1,6 @@
 # Agent Model Router
 
-Codex와 Claude Code에서 모델과 effort를 자동 선택합니다.
+Codex와 Claude Code에서 모델·effort를 자동 선택하고, 검색·기억 후보 선별을 돕습니다.
 
 ## 설치
 
@@ -30,6 +30,7 @@ node dist/cli.js compare fixtures/comparison-example.json
 ```
 
 Codex 앱을 재시작하고 새 작업에서 `Jev Auto`를 선택하세요. Claude Code는 새 세션을 시작하세요.
+검색·기억 스킬도 연결됩니다. 결과가 많은 검색 뒤 에이전트가 Jev 필터를 호출할 수 있습니다.
 
 한 앱만 설정하려면 다음을 사용하세요:
 

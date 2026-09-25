@@ -1,6 +1,6 @@
 {
   "name": "agent-model-router",
   "version": "0.2.0",
-  "description": "Per-turn model and effort routing with TypeSafe Jev and an answer footer",
+  "description": "Model and effort routing plus search and memory selection with TypeSafe Jev",
   "author": { "name": "Agent Model Router contributors" }
 }

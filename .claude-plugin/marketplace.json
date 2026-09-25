@@ -1,12 +1,12 @@
 {
   "name": "agent-model-router",
-  "description": "Per-turn model and effort routing for Claude Code with TypeSafe Jev.",
+  "description": "Model and effort routing plus search and memory selection for Claude Code with TypeSafe Jev.",
   "owner": { "name": "Agent Model Router contributors" },
   "plugins": [
     {
       "name": "agent-model-router",
       "source": "./claude-mod",
-      "description": "Automatically choose Claude Code's model and effort per turn, with an answer footer."
+      "description": "Choose Claude Code's model and effort per turn, and provide search and memory selection skills."
     }
   ]
 }

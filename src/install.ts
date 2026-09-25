@@ -103,11 +103,14 @@ export function servicePlist(context: InstallContext): string {
   return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>\n<key>Label</key><string>${LABEL}</string>\n<key>ProgramArguments</key><array>${args.map((arg) => `<string>${xml(arg)}</string>`).join("")}</array>\n<key>WorkingDirectory</key><string>${xml(context.repo)}</string>\n<key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>ThrottleInterval</key><integer>10</integer><key>Umask</key><integer>63</integer>\n<key>StandardOutPath</key><string>${xml(join(context.repo, ".local/router.stdout.log"))}</string>\n<key>StandardErrorPath</key><string>${xml(join(context.repo, ".local/router.stderr.log"))}</string>\n</dict></plist>\n`;
 }
 
-type SavedClient = { config: string | null; service?: string | null; linkExisted?: boolean };
+type SavedClient = { config: string | null; service?: string | null; linkExisted?: boolean; skillLinkExisted?: boolean };
 type InstallState = { version: 1; repo: string; codex?: SavedClient; claude?: SavedClient };
 function paths(context: InstallContext) {
   return { state: join(context.home, ".agent-model-router/install.json"), codex: join(context.home, ".codex/config.toml"),
     claude: join(context.home, ".claude/settings.json"), link: join(context.home, ".claude/skills/agent-model-router"),
+    codexSkill: join(context.home, ".agents/skills/agent-context-gates"),
+    claudeSkill: join(context.home, ".claude/skills/agent-context-gates"),
+    gateTarget: join(context.repo, "claude-mod/skills/agent-context-gates"),
     target: join(context.repo, "claude-mod"), service: join(context.home, `Library/LaunchAgents/${LABEL}.plist`) };
 }
 function stateOf(context: InstallContext): InstallState {
@@ -157,7 +160,10 @@ export async function install(client: Client, context: InstallContext): Promise<
   if (claude) {
     context.run("claude", ["plugin", "validate", "--strict", p.target]);
     if (present(p.link) && !sameLink(p.link, p.target)) throw new Error("Claude 설치 위치에 다른 파일이 있어 덮어쓰지 않았습니다.");
+    if (present(p.claudeSkill) && !sameLink(p.claudeSkill, p.gateTarget)) throw new Error("Claude 검색·기억 스킬 위치에 다른 파일이 있습니다.");
   }
+  if (codex && present(p.codexSkill) && !sameLink(p.codexSkill, p.gateTarget)) throw new Error("Codex 검색·기억 스킬 위치에 다른 파일이 있습니다.");
+  if (!existsSync(p.gateTarget)) throw new Error("검색·기억 스킬 파일이 없습니다. 저장소를 다시 확인하세요.");
   const beforeCodex = read(p.codex); const beforeClaude = read(p.claude); const beforeService = read(p.service);
   const updatedCodex = codex ? configureCodex(beforeCodex ?? "") : null;
   const updatedClaude = claude ? configureClaude(beforeClaude, context.repo) : null;
@@ -180,6 +186,8 @@ export async function install(client: Client, context: InstallContext): Promise<
   }
   backup(context, [p.codex, p.claude, p.service, p.state]);
   const hadLink = present(p.link);
+  const hadCodexSkill = present(p.codexSkill);
+  const hadClaudeSkill = present(p.claudeSkill);
   const oldState = read(p.state);
   let serviceStopped = false;
   try {
@@ -202,12 +210,17 @@ export async function install(client: Client, context: InstallContext): Promise<
       if (!ready) throw new Error("새 라우터 서버가 준비되지 않아 설정을 복원합니다. .local/router.stderr.log를 확인하세요.");
       write(p.codex, updatedCodex!);
       state.codex ??= { config: beforeCodex, service: beforeService };
+      mkdirSync(dirname(p.codexSkill), { recursive: true, mode: 0o700 });
+      if (!hadCodexSkill) symlinkSync(p.gateTarget, p.codexSkill, context.platform === "win32" ? "junction" : "dir");
+      state.codex.skillLinkExisted ??= hadCodexSkill;
     }
     if (claude) {
       mkdirSync(dirname(p.link), { recursive: true, mode: 0o700 });
       if (!hadLink) symlinkSync(p.target, p.link, context.platform === "win32" ? "junction" : "dir");
+      if (!hadClaudeSkill) symlinkSync(p.gateTarget, p.claudeSkill, context.platform === "win32" ? "junction" : "dir");
       write(p.claude, updatedClaude!);
       state.claude ??= { config: beforeClaude, linkExisted: hadLink };
+      state.claude.skillLinkExisted ??= hadClaudeSkill;
     }
     write(p.state, json(state));
   } catch (error) {
@@ -215,13 +228,15 @@ export async function install(client: Client, context: InstallContext): Promise<
       stop(context, p.service); restore(p.service, beforeService); restore(p.codex, beforeCodex);
       if (beforeService) start(context, p.service);
     }
+    if (codex && !hadCodexSkill && sameLink(p.codexSkill, p.gateTarget)) rmSync(p.codexSkill);
     if (claude) { restore(p.claude, beforeClaude); if (!hadLink && sameLink(p.link, p.target)) rmSync(p.link); }
+    if (claude && !hadClaudeSkill && sameLink(p.claudeSkill, p.gateTarget)) rmSync(p.claudeSkill);
     restore(p.state, oldState);
     throw error;
   }
   return `${client} 설치 완료. 설정 백업: ${join(context.home, ".agent-model-router/backups")}\n` +
-    (codex ? "Codex: 로그인 시 서버가 자동 시작됩니다. 앱을 재시작하고 새 작업에서 Jev Auto를 선택하세요.\n" : "") +
-    (claude ? "Claude: 새 CLI/Code 탭 세션부터 자동 적용됩니다. /amr-route로 확인하세요.\n" : "") +
+    (codex ? "Codex: 로그인 시 서버가 자동 시작됩니다. 앱을 재시작하고 새 작업에서 Jev Auto를 선택하세요. 검색·기억 스킬도 연결됐습니다.\n" : "") +
+    (claude ? "Claude: 새 CLI/Code 탭 세션부터 자동 적용됩니다. /amr-route로 확인하세요. 검색·기억 스킬도 연결됐습니다.\n" : "") +
     "최종 답변 아래에 실제 모델과 요청 effort가 표시됩니다. npm run doctor로 설치 상태를 확인하세요.\n";
 }
 
@@ -235,15 +250,19 @@ export function uninstall(client: Client, context: InstallContext): string {
   const nextClaude = claude ? unconfigureClaude(read(p.claude) ?? "{}", claude.config, context.repo) : null;
   if (codex && read(p.service) !== servicePlist(context)) throw new Error("라우터 서비스 파일이 변경되어 자동 해제를 중단했습니다.");
   if (claude && !sameLink(p.link, p.target)) throw new Error("Claude 플러그인 연결이 변경되어 자동 해제를 중단했습니다.");
+  if (codex && codex.skillLinkExisted === false && !sameLink(p.codexSkill, p.gateTarget)) throw new Error("Codex 검색·기억 스킬 연결이 변경됐습니다.");
+  if (claude && claude.skillLinkExisted === false && !sameLink(p.claudeSkill, p.gateTarget)) throw new Error("Claude 검색·기억 스킬 연결이 변경됐습니다.");
   if (!codex && !claude) throw new Error("이 설치 도구의 설치 기록이 없습니다. 먼저 npm run setup으로 기존 설치를 등록하세요.");
   backup(context, [p.codex, p.claude, p.service, p.state]);
   if (codex) {
     // Restore the provider before stopping the service, including adopted legacy installs.
     write(p.codex, nextCodex!);
     stop(context, p.service); rmSync(p.service, { force: true }); delete state.codex;
+    if (codex.skillLinkExisted === false) rmSync(p.codexSkill);
   }
   if (claude) {
     write(p.claude, nextClaude!); rmSync(p.link); delete state.claude;
+    if (claude.skillLinkExisted === false) rmSync(p.claudeSkill);
   }
   write(p.state, json(state));
   return "자동 라우팅을 해제했습니다. Codex 앱을 재시작하고 새 작업을 만드세요. Claude도 새 세션부터 반영됩니다. 키 파일은 보존했습니다.\n";
@@ -270,6 +289,8 @@ export async function doctor(context: InstallContext): Promise<string> {
     lines.push(`Codex: 로컬 라우터 공급자 ${configured ? "연결됨" : "연결 안 됨"}`);
   } catch { lines.push("Codex: 설정 형식을 자동 진단할 수 없음"); }
   lines.push(`  설정: ${p.codex}\n  로그인 시 자동 실행: ${existsSync(p.service) ? "서비스 파일 있음" : "서비스 파일 없음"} (${p.service})`);
+  lines.push(`  Codex 검색·기억 스킬: ${sameLink(p.codexSkill, p.gateTarget) ? "연결됨" : "연결 안 됨"}`);
+  lines.push(`  Claude 검색·기억 스킬: ${sameLink(p.claudeSkill, p.gateTarget) ? "연결됨" : "연결 안 됨"}`);
   try {
     const response = await fetch(`http://127.0.0.1:${PORT}/health`, { signal: AbortSignal.timeout(700) });
     const health = await response.json() as { status?: string; service?: string; responseFooter?: boolean };

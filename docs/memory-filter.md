@@ -18,4 +18,4 @@ node dist/cli.js memory-report .local/memory.jsonl
 node dist/cli.js memory-evaluate fixtures/memory-evaluation-example.json
 ```
 
-이 평가는 조각 선택의 품질만 측정합니다. 최종 답변 품질과 전체 시간·비용은 동일 작업 비교로 검증해야 합니다. 예제는 합성 데이터이며, 현재 Codex·Claude Code의 내장 기억 검색을 자동으로 가로채지 않습니다.
+이 평가는 조각 선택의 품질만 측정합니다. 최종 답변 품질과 전체 시간·비용은 동일 작업 비교로 검증해야 합니다. 예제는 합성 데이터입니다. 설치된 `agent-context-gates` 스킬은 기억 후보가 많은 경우 에이전트에게 이 명령을 호출하도록 안내합니다. 내장 기억 검색을 자동으로 가로채지는 않습니다.

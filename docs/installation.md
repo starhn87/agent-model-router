@@ -4,9 +4,9 @@
 
 ## 설치 도구가 변경하는 범위
 
-`npm run setup -- codex`는 `.codex/config.toml`의 최상위 모델·공급자와 `model_providers.agent_router` 테이블을 설정하고, macOS 사용자 LaunchAgent를 등록합니다. 서버가 정상 응답하는지 확인한 후 Codex의 공급자를 바꿉니다. 설치 도중 실패하면 이전 파일을 복원합니다. `~/.agent-model-router/backups/`에 설정 백업을 남깁니다.
+`npm run setup -- codex`는 `.codex/config.toml`의 최상위 모델·공급자와 `model_providers.agent_router` 테이블을 설정하고, macOS 사용자 LaunchAgent를 등록합니다. `~/.agents/skills/agent-context-gates`에 검색·기억 스킬을 연결합니다. 서버가 정상 응답하는지 확인한 후 Codex의 공급자를 바꿉니다. 설치 도중 실패하면 이전 파일을 복원합니다. `~/.agent-model-router/backups/`에 설정 백업을 남깁니다.
 
-`npm run setup -- claude`는 사용자 skills 폴더의 로컬 플러그인 연결과 `.claude/settings.json`의 네 개 환경변수만 설정합니다. 기존 다른 설정을 보존합니다. 마켓플레이스의 동일 플러그인이 활성화되어 있으면 중복 설치를 거절합니다.
+`npm run setup -- claude`는 사용자 skills 폴더에 로컬 플러그인과 검색·기억 스킬을 연결하고 `.claude/settings.json`의 네 개 환경변수를 설정합니다. 기존 다른 설정을 보존합니다. 마켓플레이스의 동일 플러그인이 활성화되어 있으면 중복 설치를 거절합니다.
 
 설치 도구는 기본 사용자 경로 `~/.codex`, `~/.claude`를 대상으로 합니다. 사용자 지정 `CODEX_HOME`·`CLAUDE_CONFIG_DIR` 또는 조직 관리 설정에서는 아래 수동 구성을 사용하세요. 기존 관련 없는 `agent_router` 공급자, 다른 플러그인 폴더, 복잡한 TOML 형식은 자동으로 덮어쓰지 않습니다.
 
@@ -58,6 +58,8 @@ claude plugin install agent-model-router@agent-model-router
 ```
 
 게시 전 로컬 목록을 검사하려면 저장소 루트에서 `claude plugin validate .`를 실행하세요. 로컬 목록 자체를 설치하려면 `claude plugin marketplace add .` 이후 같은 `plugin install` 명령을 사용할 수 있습니다. **로컬 연결 방식으로 이미 설치했다면 `npm run disable -- claude`로 먼저 해제**하세요.
+
+마켓플레이스 플러그인에는 `agent-context-gates` 스킬도 포함됩니다. 스킬의 명령은 이 저장소에서 빌드한 CLI를 사용하며, `AMR_ENV_FILE`을 저장소의 `.env` 절대 경로로 설정해야 합니다. 스킬은 에이전트에게 필터 호출을 안내하지만 내장 검색·기억 도구를 가로채지는 않습니다.
 
 키는 안정적인 위치의 `.env`에 두고, `~/.claude/settings.json`의 기존 `env` 객체에 아래 값을 병합하세요. 다른 환경변수·설정을 지우지 마세요. 플러그인 캐시 경로에 키를 넣으면 업데이트 때 잃을 수 있습니다.
 
