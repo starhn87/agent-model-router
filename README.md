@@ -57,3 +57,5 @@ npm run disable -- claude
 [설치 및 문제 해결](docs/installation.md) · [라우팅 규칙](docs/routing-policy.md) · [측정과 비교](docs/measurement.md) · [키 보관](docs/local-secrets.md) · [검증 기록](docs/validation-plan.md)
 
 검색 결과 선별 실험: [명령어](docs/search-gate.md)
+
+기억 후보 선별 실험: [명령어](docs/memory-filter.md)

@@ -1,4 +1,5 @@
 import type { JevOptions } from "./jev.js";
+import { looksLikeInjection, looksSensitive } from "./content-screen.js";
 
 export type SearchResult = { id: string; title: string; url?: string; snippet: string };
 export type SearchInput = { question: string; results: SearchResult[]; candidateQueries?: string[] };
@@ -21,8 +22,6 @@ export type SearchAsk = (state: Record<string, unknown>, questions: Record<strin
 const MAX_RESULTS = 20;
 const TOP_K = 5;
 const MAX_BYTES = 64 * 1024;
-const SENSITIVE = /(?:-----BEGIN [A-Z ]*PRIVATE KEY-----|(?:api[_ -]?key|access[_ -]?token|bearer|password|secret)\s*[:=]\s*\S+|[\w.+-]+@[\w.-]+\.[a-z]{2,}|\+?\d[\d ()-]{8,}\d|\b[a-f0-9]{32,}\b|\.env\b)/i;
-const INJECTION = /(?:ignore (?:all )?(?:previous|prior) instructions|reveal (?:your|the) (?:system|developer) prompt|send .* (?:api key|password)|execute (?:this|the) command|이전 (?:모든 )?지시(?:를|사항을) 무시)/i;
 
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -81,7 +80,7 @@ function validNoul(value: unknown): number | null {
 export async function searchGate(raw: SearchInput, ask: SearchAsk = askSearchJev): Promise<SearchDecision> {
   const input = parseSearchInput(raw);
   const started = Date.now();
-  const flaggedIds = input.results.filter((item) => INJECTION.test(`${item.title}\n${item.snippet}`)).map((item) => item.id);
+  const flaggedIds = input.results.filter((item) => looksLikeInjection(`${item.title}\n${item.snippet}`)).map((item) => item.id);
   const candidates = input.results.filter((item) => !flaggedIds.includes(item.id));
   const head = candidates.slice(0, TOP_K).map((item) => item.id);
   const base = (reason: SearchDecision["reason"]): SearchDecision => ({ status: "unknown", decision: "unknown",
@@ -89,7 +88,7 @@ export async function searchGate(raw: SearchInput, ask: SearchAsk = askSearchJev
   if (candidates.length <= TOP_K) return base("small-result-set");
   if (input.results.length > MAX_RESULTS) return base("too-many-results");
   const pieces = [input.question, ...(input.candidateQueries ?? []), ...candidates.flatMap((item) => [item.title, item.snippet, item.url ?? ""])];
-  if (pieces.some((value) => SENSITIVE.test(value))) return base("sensitive-input");
+  if (pieces.some(looksSensitive)) return base("sensitive-input");
 
   // Only snippets and titles reach Jev. Local IDs, full URLs, query strings and source paths stay here.
   const passages = candidates.map((item, index) => ({ key: `p${index}`, text: `${item.title}\n${item.snippet}`.slice(0, 900) }));

@@ -32,8 +32,9 @@ export function readSearchEvaluation(file: string): SearchEvaluationCase[] {
   return value as SearchEvaluationCase[];
 }
 
-export function evaluateSearchSelections(cases: SearchEvaluationCase[]) {
+export function evaluateSearchSelections(cases: SearchEvaluationCase[], baselineK = 5) {
   if (!cases.length) throw new Error("search evaluation cases required");
+  if (!Number.isSafeInteger(baselineK) || baselineK < 1) throw new Error("invalid baseline size");
   let needed = 0;
   let baselineFound = 0;
   let selectedFound = 0;
@@ -44,7 +45,7 @@ export function evaluateSearchSelections(cases: SearchEvaluationCase[]) {
   let selectedCount = 0;
   let baselineCount = 0;
   for (const item of cases) {
-    const baseline = new Set(item.resultIds.slice(0, 5));
+    const baseline = new Set(item.resultIds.slice(0, baselineK));
     const selected = new Set(item.selectedIds);
     const baseFound = item.neededIds.filter((id) => baseline.has(id)).length;
     const gateFound = item.neededIds.filter((id) => selected.has(id)).length;

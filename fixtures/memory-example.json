@@ -1,0 +1,14 @@
+{
+  "query": "Which synthetic release fixed the timeout?",
+  "candidates": [
+    { "id": "m0", "text": "The service has three regions." },
+    { "id": "m1", "text": "A team meeting discussed documentation." },
+    { "id": "m2", "text": "The dashboard uses blue and gray colors." },
+    { "id": "m3", "text": "The service started in 2024." },
+    { "id": "m4", "text": "An unrelated release added themes." },
+    { "id": "m5", "text": "A synthetic customer asked about export formats." },
+    { "id": "m6", "text": "The team considered a new menu layout." },
+    { "id": "m7", "text": "The service supports CSV output." },
+    { "id": "m8", "text": "Synthetic release 2.4 fixed the timeout by changing retry behavior." }
+  ]
+}

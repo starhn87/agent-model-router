@@ -15,6 +15,8 @@ import { compareRuns, readComparisonInput } from "./compare.js";
 import { askSearchJev, searchGate, type SearchInput } from "./search-gate.js";
 import { readSearchMetrics, writeSearchMetric } from "./search-metrics.js";
 import { evaluateSearchSelections, readSearchEvaluation } from "./search-evaluate.js";
+import { filterMemory, type MemoryInput } from "./memory-filter.js";
+import { readMemoryMetrics, writeMemoryMetric } from "./memory-metrics.js";
 import { defaultInstallContext, doctor, install, uninstall, type Client } from "./install.js";
 import type { Mode, RouteChoice, RouteQuery, RouterSettings, Tier } from "./types.js";
 
@@ -175,6 +177,9 @@ function help(): void {
     `  amr search FILE|- [--metrics FILE]  (search-result decision; up to two paid Jev calls)\n` +
     `  amr search-report FILE\n` +
     `  amr search-evaluate FILE  (human-labelled needed-source recall)\n` +
+    `  amr memory-filter FILE|- [--metrics FILE]  (passage selection; up to one paid Jev call)\n` +
+    `  amr memory-report FILE\n` +
+    `  amr memory-evaluate FILE  (human-labelled needed-passage recall)\n` +
     `  amr evaluate FILE --max-calls N [--keychain-service NAME --keychain-account USER]  (paid Jev calls)\n\n` +
     `Router options: --mode pass|force|shadow|auto, --force-model ID,\n` +
     `  --baseline-model ID, --fast-model ID, --balanced-model ID,\n` +
@@ -239,6 +244,42 @@ async function main(): Promise<void> {
   if (command === "search-evaluate") {
     if (args.length !== 1) throw new Error("search-evaluate requires one labelled file");
     process.stdout.write(`${JSON.stringify(evaluateSearchSelections(readSearchEvaluation(args[0]!)), null, 2)}\n`);
+    return;
+  }
+  if (command === "memory-filter") {
+    if (!args[0]) throw new Error("memory-filter requires a JSON file or - for stdin");
+    const options = new Map<string, string>();
+    for (let index = 1; index < args.length; index += 2) {
+      const flag = args[index], value = args[index + 1];
+      if (!flag || !["--metrics", "--keychain-service", "--keychain-account"].includes(flag) || !value || options.has(flag)) {
+        throw new Error("invalid memory-filter options");
+      }
+      options.set(flag, value);
+    }
+    const source = args[0] === "-" ? await readHookInput() : (() => {
+      if (statSync(args[0]!).size > 4 * 1024 * 1024) throw new Error("memory input file too large");
+      return JSON.parse(readFileSync(args[0]!, "utf8")) as unknown;
+    })();
+    const spec = keychainSpec(options.get("--keychain-service"), options.get("--keychain-account"));
+    const ask = spec ? async (state: Record<string, unknown>, questions: Record<string, unknown>) =>
+      askSearchJev(state, questions, { apiKey: await keychainApiKey(spec.service, spec.account) }) : askSearchJev;
+    const input = source as MemoryInput;
+    const result = await filterMemory(input, ask);
+    if (options.has("--metrics")) {
+      try { writeMemoryMetric(options.get("--metrics")!, input.candidates.length, result); }
+      catch { process.stderr.write("[amr] memory metrics sink unavailable\n"); }
+    }
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return;
+  }
+  if (command === "memory-report") {
+    if (args.length !== 1) throw new Error("memory-report requires one metrics file");
+    process.stdout.write(`${JSON.stringify(readMemoryMetrics(args[0]!), null, 2)}\n`);
+    return;
+  }
+  if (command === "memory-evaluate") {
+    if (args.length !== 1) throw new Error("memory-evaluate requires one labelled file");
+    process.stdout.write(`${JSON.stringify(evaluateSearchSelections(readSearchEvaluation(args[0]!), 8), null, 2)}\n`);
     return;
   }
   if (command === "evaluate") {
