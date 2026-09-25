@@ -35,6 +35,8 @@ Jev 요청 한 번에서 모델 등급과 effort 점수를 함께 받도록 수�
 
 모델 선택 표시 개선: Codex 앱의 `model/list`는 모델 카탈로그의 정적 이름과 effort 선택지를 표시한다. `auto` 모드에서만 기존 기준 모델 `gpt-6-astra`의 표시 이름을 `Jev Auto`로 바꾸고 실제 모델 ID·지원 effort 값은 유지했다. 별도 app-server의 `model/list` 호출에서 `model=gpt-6-astra`, `displayName=Jev Auto`를 확인했다. 이는 새 가상 모델 ID를 만들지 않으며, 앱 선택 영역에 실제 턴별 응답 모델·effort를 표시하는 기능은 아니다. 로컬 `/status` 화면은 지표 파일의 요청 ID로 판정과 완료 응답을 연결해 전체 Codex 작업의 실제 응답 모델·요청 effort를 보여준다. 합성 지표를 사용한 로컬 HTTP 시험에서 표시·JSON 응답·프롬프트 미노출을 확인했고, 기존 실제 지표를 읽는 별도 로컬 서버에서도 `gpt-6-luna`·`low`가 표시되는 것을 확인했다. 앱을 재시작한 실제 선택 영역의 최종 표시 확인은 남아 있다.
 
+Auto effort 메뉴 검토: 설치된 Codex `0.155.0-alpha.16.4`의 app-server는 `ReasoningEffort`를 문자열로 받고, 합성 카탈로그의 `auto` 선택지·기본값을 `model/list`에 반환했다. 그러나 데스크톱 앱의 실제 메뉴 코드는 별도의 고정 목록(`none`·`minimal`·`low`·`medium`·`high`·`xhigh`·`max`·`ultra`·`persistent`)으로 선택지를 필터링해 `auto`를 제외한다. 따라서 app-server 응답만으로 네이티브 메뉴 추가를 검증할 수 없다. 시험용 `auto` effort 카탈로그와 요청 변환 구현은 되돌렸으며, 전역 effort 설정은 변경하지 않았다. Jev Auto의 모델·effort 자동 선택과 상태 화면은 기존대로 유지한다. 이 검토에는 유료 모델 호출을 사용하지 않았다.
+
 ## 2. Jev 추천 품질
 
 `fixtures/routing-cases.json`의 합성 사례를 시작점으로, 실제 사용에 가까운 한국어 턴 최소 30개를 사람이 먼저 독립적으로 등급 판정한다. `amr evaluate`의 결과와 비교한다.
