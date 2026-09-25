@@ -27,3 +27,21 @@ test("response observations show served models and cache reads without doubling 
   assert.equal(summary.differentModelIds, 1);
   assert.equal(summary.observedCacheReadRate, 0.75);
 });
+
+test("task summary includes tool calls and reports only observed spans", () => {
+  const input = [
+    { at: "2026-01-01T00:00:00.000Z", client: "codex", result: "routed", requestId: "first", taskId: "anonymous-1" },
+    { at: "2026-01-01T00:00:00.100Z", client: "codex", kind: "response", requestId: "first", taskId: "anonymous-1", requestedModel: "fast", servedModel: "fast", inputTokens: 100, cachedInputTokens: 80, outputTokens: 10, requestDurationMs: 100 },
+    { at: "2026-01-01T00:00:00.250Z", client: "codex", kind: "response", requestId: "tool", taskId: "anonymous-1", requestedModel: "fast", servedModel: "fast", inputTokens: 200, cachedInputTokens: 180, outputTokens: 20, requestDurationMs: 120 },
+    { at: "2026-01-01T00:00:00.300Z", client: "codex", result: "kept", requestId: "second", taskId: "anonymous-2" },
+  ].map((event) => JSON.stringify(event)).join("\n");
+  const tasks = summarizeMetrics(input).tasks;
+  assert.equal(tasks.started, 2);
+  assert.equal(tasks.withCompletedResponse, 1);
+  assert.equal(tasks.toolContinuations, 1);
+  assert.equal(tasks.inputTokens, 300);
+  assert.equal(tasks.cachedInputTokens, 260);
+  assert.equal(tasks.outputTokens, 30);
+  assert.equal(tasks.p50RequestDurationMs, 100);
+  assert.equal(tasks.p95ObservedSpanMs, 250);
+});

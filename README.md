@@ -21,6 +21,13 @@ npm run setup
 npm run doctor
 ```
 
+사용량 요약:
+
+```bash
+npm run build
+node dist/cli.js report .local/codex-persistent.jsonl
+```
+
 Codex 앱을 재시작하고 새 작업에서 `Jev Auto`를 선택하세요. Claude Code는 새 세션을 시작하세요.
 
 한 앱만 설정하려면 다음을 사용하세요:
@@ -46,4 +53,4 @@ npm run disable -- claude
 
 ## 더 알아보기
 
-[설치 및 문제 해결](docs/installation.md) · [라우팅 규칙](docs/routing-policy.md) · [키 보관](docs/local-secrets.md) · [검증 기록](docs/validation-plan.md)
+[설치 및 문제 해결](docs/installation.md) · [라우팅 규칙](docs/routing-policy.md) · [측정과 비교](docs/measurement.md) · [키 보관](docs/local-secrets.md) · [검증 기록](docs/validation-plan.md)

@@ -38,7 +38,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export class CodexRouter {
-  private readonly sessions = new Map<string, { model: string; effort?: string }>();
+  private readonly sessions = new Map<string, { model: string; effort?: string; taskId: string }>();
+  private readonly requestTasks = new Map<string, string>();
   private readonly catalog = new Map<string, CatalogModel>();
   private readonly classify: (query: RouteQuery) => Promise<RouteChoice>;
   private metricsWarningShown = false;
@@ -49,15 +50,19 @@ export class CodexRouter {
 
   private report(event: Omit<DecisionEvent, "at" | "mode" | "client">, requestId?: string): void {
     try {
-      this.options.onDecision?.({ at: new Date().toISOString(), client: "codex", mode: this.options.settings.mode, ...event, requestId });
+      this.options.onDecision?.({ at: new Date().toISOString(), client: "codex", mode: this.options.settings.mode, ...event,
+        requestId, ...(requestId && this.requestTasks.has(requestId) ? { taskId: this.requestTasks.get(requestId) } : {}) });
     } catch { this.warnMetricsFailure(); }
   }
 
-  recordObservation(requestId: string, requestedModel: string, requestedEffort: string | undefined, observed: ObservedResponse): void {
+  recordObservation(requestId: string, requestedModel: string, requestedEffort: string | undefined, observed: ObservedResponse, requestDurationMs?: number): void {
     try {
       this.options.onObservation?.({ at: new Date().toISOString(), client: "codex", kind: "response",
-        requestId, requestedModel, ...(requestedEffort ? { requestedEffort } : {}), ...observed });
+        requestId, ...(this.requestTasks.has(requestId) ? { taskId: this.requestTasks.get(requestId) } : {}),
+        ...(requestDurationMs !== undefined ? { requestDurationMs } : {}),
+        requestedModel, ...(requestedEffort ? { requestedEffort } : {}), ...observed });
     } catch { this.warnMetricsFailure(); }
+    finally { this.requestTasks.delete(requestId); }
   }
 
   private warnMetricsFailure(): void {
@@ -66,9 +71,9 @@ export class CodexRouter {
     process.stderr.write("[amr] metrics sink unavailable\n");
   }
 
-  private remember(key: string, model: string, effort?: string): void {
+  private remember(key: string, model: string, taskId: string, effort?: string): void {
     this.sessions.delete(key);
-    this.sessions.set(key, { model, ...(effort ? { effort } : {}) });
+    this.sessions.set(key, { model, taskId, ...(effort ? { effort } : {}) });
     if (this.sessions.size > 100) this.sessions.delete(this.sessions.keys().next().value ?? "");
   }
 
@@ -129,6 +134,11 @@ export class CodexRouter {
     const currentModel = previous?.model ?? (settings.mode === "auto"
       ? fallbackModel(settings.baselineModel, settings, this.allowedModels()) : settings.baselineModel);
     const turn = latestUserTurn(body);
+    const taskId = turn ? randomUUID() : previous?.taskId;
+    if (requestId && taskId) {
+      this.requestTasks.set(requestId, taskId);
+      if (this.requestTasks.size > 500) this.requestTasks.delete(this.requestTasks.keys().next().value ?? "");
+    }
     const incomingEffort = isRecord(body.reasoning) && typeof body.reasoning.effort === "string"
       ? body.reasoning.effort : undefined;
     let selectedEffort = turn ? incomingEffort : previous?.effort ?? incomingEffort;
@@ -188,7 +198,7 @@ export class CodexRouter {
     }
 
     const effectiveEffort = this.effectiveEffort(result.model, selectedEffort);
-    if (turn && key) this.remember(key, result.model, effectiveEffort);
+    if (turn && key && taskId) this.remember(key, result.model, taskId, effectiveEffort);
     const routed: CodexBody = { ...body, model: result.model };
     if (effectiveEffort && effectiveEffort !== incomingEffort) {
       routed.reasoning = { ...(isRecord(body.reasoning) ? body.reasoning : {}), effort: effectiveEffort };
@@ -228,6 +238,7 @@ function respondError(response: ServerResponse, status: number, message: string)
 
 async function handleRequest(request: IncomingMessage, response: ServerResponse, router: CodexRouter,
   upstreamBaseUrl: string, statusFile?: string): Promise<void> {
+  const requestStarted = Date.now();
   const rawPath = request.url ?? "/";
   if (!rawPath.startsWith("/") || rawPath.startsWith("//")) return respondError(response, 400, "invalid path");
   if (request.method === "GET" && rawPath === "/health") {
@@ -299,7 +310,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         const record = (observed: ObservedResponse | null): void => {
           if (!observed || recorded) return;
           recorded = true;
-          router.recordObservation(requestId!, requestedModel!, requestedEffort, observed);
+          router.recordObservation(requestId!, requestedModel!, requestedEffort, observed, Date.now() - requestStarted);
         };
         upstreamResponse.on("data", (chunk: Buffer) => {
           observer.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));

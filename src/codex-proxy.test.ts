@@ -5,6 +5,7 @@ import test from "node:test";
 import { CodexRouter, startCodexProxy } from "./codex-proxy.js";
 import { defaultSettings } from "./policy.js";
 import type { CodexBody } from "./codex-request.js";
+import type { DecisionEvent, ResponseObservationEvent } from "./types.js";
 
 const catalog = {
   models: [
@@ -80,6 +81,27 @@ test("auto mode classifies each new turn once and pins tool continuations", asyn
   assert.equal(calls, 1);
   assert.equal((await router.route(userBody("다음 버그도 분석하고 수정해줘"))).model, "gpt-6-luna");
   assert.equal(calls, 2);
+});
+
+test("anonymous task IDs join tool responses but separate new turns and sessions", async () => {
+  const decisions: DecisionEvent[] = [];
+  const observations: ResponseObservationEvent[] = [];
+  const router = new CodexRouter({ settings: defaultSettings("pass"), onDecision: (event) => decisions.push(event),
+    onObservation: (event) => observations.push(event) });
+  const continuation = { model: "gpt-6-sol", client_metadata: { thread_id: "conversation-1" },
+    input: [{ type: "function_call_output", output: "private tool output" }] };
+  await router.route(userBody(), "first");
+  await router.route(continuation, "tool");
+  router.recordObservation("tool", "gpt-6-sol", "medium", { servedModel: "gpt-6-sol", inputTokens: 20 }, 42);
+  await router.route(userBody("다른 작업"), "second");
+  await router.route({ ...continuation, client_metadata: { thread_id: "conversation-2" } }, "other");
+  router.recordObservation("other", "gpt-6-sol", undefined, { servedModel: "gpt-6-sol" });
+  assert.ok(decisions[0]?.taskId);
+  assert.equal(observations[0]?.taskId, decisions[0]?.taskId);
+  assert.equal(observations[0]?.requestDurationMs, 42);
+  assert.notEqual(decisions[1]?.taskId, decisions[0]?.taskId);
+  assert.equal(observations[1]?.taskId, undefined);
+  assert.equal(JSON.stringify([...decisions, ...observations]).includes("private tool output"), false);
 });
 
 test("auto mode chooses supported effort with Jev and pins it through tool calls", async () => {

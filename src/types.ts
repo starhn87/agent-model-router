@@ -49,6 +49,7 @@ export type DecisionEvent = {
   latencyMs?: number;
   jevInputTokens?: number;
   requestId?: string;
+  taskId?: string;
   reason: string;
 };
 
@@ -57,6 +58,8 @@ export type ResponseObservationEvent = {
   client: "codex";
   kind: "response";
   requestId: string;
+  taskId?: string;
+  requestDurationMs?: number;
   requestedModel: string;
   requestedEffort?: string;
   servedModel: string;
