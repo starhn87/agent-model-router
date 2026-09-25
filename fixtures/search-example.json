@@ -1,0 +1,12 @@
+{
+  "question": "When did the synthetic service recover?",
+  "candidateQueries": ["synthetic service recovery timeline", "synthetic service incident summary"],
+  "results": [
+    { "id": "r0", "title": "Overview", "url": "https://example.org/overview", "snippet": "General background about the synthetic service." },
+    { "id": "r1", "title": "Pricing", "url": "https://example.org/pricing", "snippet": "A pricing page unrelated to the incident." },
+    { "id": "r2", "title": "Incident notice", "url": "https://example.org/incident", "snippet": "The synthetic outage began on Monday at 09:00." },
+    { "id": "r3", "title": "Architecture", "url": "https://example.org/architecture", "snippet": "An overview of the service components." },
+    { "id": "r4", "title": "Release notes", "url": "https://example.org/releases", "snippet": "Recent product changes." },
+    { "id": "r5", "title": "Recovery timeline", "url": "https://example.org/recovery", "snippet": "The synthetic service recovered on Monday at 10:30." }
+  ]
+}

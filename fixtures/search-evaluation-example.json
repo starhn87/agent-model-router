@@ -1,0 +1,8 @@
+[
+  {
+    "id": "synthetic-1",
+    "resultIds": ["r0", "r1", "r2", "r3", "r4", "r5"],
+    "neededIds": ["r5"],
+    "selectedIds": ["r5", "r2"]
+  }
+]
