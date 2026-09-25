@@ -98,6 +98,23 @@ test("existing Claude plugin link migrates to the new ID and remains removable",
   assert.equal(existsSync(current), false);
 });
 
+test("user-owned legacy Claude link moves to the new ID and stays on uninstall", async (t) => {
+  const h = fixture(t);
+  const legacy = join(h.context.home, ".claude/skills/agent-model-router");
+  mkdirSync(join(h.context.home, ".claude/skills"), { recursive: true });
+  symlinkSync(join(h.context.repo, "claude-mod"), legacy, "dir");
+  h.put(".agent-model-router/install.json", JSON.stringify({ version: 1, repo: h.context.repo,
+    claude: { config: null, linkExisted: true } }));
+  h.put(".claude/settings.json", JSON.stringify({ env: { CLAUDE_CODE_ENABLE_FUNCTION_HOOKS: "1",
+    AMR_CLAUDE_AUTO: "1", AMR_ENV_FILE: join(h.context.repo, ".env"), AMR_RESPONSE_FOOTER: "1" } }));
+  await install("claude", h.context);
+  const current = join(h.context.home, ".claude/skills/jev-agent-optimizer");
+  assert.equal(existsSync(legacy), false);
+  assert.ok(lstatSync(current).isSymbolicLink());
+  uninstall("claude", h.context);
+  assert.ok(lstatSync(current).isSymbolicLink());
+});
+
 test("both install runs service before redirecting Codex, and disable preserves unrelated changes", async (t) => {
   const h = fixture(t);
   let started = false;

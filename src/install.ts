@@ -168,8 +168,8 @@ export async function install(client: Client, context: InstallContext): Promise<
       throw new Error("기존 Claude 플러그인 연결이 있습니다. 기존 설치를 해제한 뒤 다시 설치하세요.");
     if (state.claude && present(p.legacyLink) && !sameLink(p.legacyLink, p.target))
       throw new Error("기존 Claude 플러그인 연결이 변경되어 자동 이전을 중단했습니다.");
-    if (state.claude?.linkExisted === true && sameLink(p.legacyLink, p.target))
-      throw new Error("기존 Claude 연결이 사용자 소유라 자동 이전하지 않았습니다. 직접 이전한 뒤 다시 설치하세요.");
+    if (state.claude?.linkExisted === true && present(p.link) && sameLink(p.legacyLink, p.target))
+      throw new Error("기존·새 Claude 연결이 모두 있어 사용자 소유 연결을 자동 이전하지 않았습니다.");
     if (present(p.claudeSkill) && !sameLink(p.claudeSkill, p.gateTarget)) throw new Error("Claude 검색·기억 스킬 위치에 다른 파일이 있습니다.");
   }
   if (codex && present(p.codexSkill) && !sameLink(p.codexSkill, p.gateTarget)) throw new Error("Codex 검색·기억 스킬 위치에 다른 파일이 있습니다.");
@@ -196,7 +196,8 @@ export async function install(client: Client, context: InstallContext): Promise<
   }
   backup(context, [p.codex, p.claude, p.service, p.state]);
   const hadLink = present(p.link);
-  const hadLegacyLink = Boolean(state.claude && state.claude.linkExisted !== true && sameLink(p.legacyLink, p.target));
+  const hadLegacyLink = Boolean(state.claude && sameLink(p.legacyLink, p.target));
+  const migrateOwnedLink = hadLegacyLink && state.claude?.linkExisted === true;
   const hadCodexSkill = present(p.codexSkill);
   const hadClaudeSkill = present(p.claudeSkill);
   const oldState = read(p.state);
@@ -227,12 +228,13 @@ export async function install(client: Client, context: InstallContext): Promise<
     }
     if (claude) {
       mkdirSync(dirname(p.link), { recursive: true, mode: 0o700 });
-      if (!hadLink) symlinkSync(p.target, p.link, context.platform === "win32" ? "junction" : "dir");
+      if (migrateOwnedLink) renameSync(p.legacyLink, p.link);
+      else if (!hadLink) symlinkSync(p.target, p.link, context.platform === "win32" ? "junction" : "dir");
       if (!hadClaudeSkill) symlinkSync(p.gateTarget, p.claudeSkill, context.platform === "win32" ? "junction" : "dir");
       write(p.claude, updatedClaude!);
       state.claude ??= { config: beforeClaude, linkExisted: hadLink };
       state.claude.skillLinkExisted ??= hadClaudeSkill;
-      if (hadLegacyLink) rmSync(p.legacyLink);
+      if (hadLegacyLink && !migrateOwnedLink) rmSync(p.legacyLink);
     }
     write(p.state, json(state));
   } catch (error) {
@@ -241,8 +243,13 @@ export async function install(client: Client, context: InstallContext): Promise<
       if (beforeService) start(context, p.service);
     }
     if (codex && !hadCodexSkill && sameLink(p.codexSkill, p.gateTarget)) rmSync(p.codexSkill);
-    if (claude) { restore(p.claude, beforeClaude); if (!hadLink && sameLink(p.link, p.target)) rmSync(p.link); }
-    if (claude && hadLegacyLink && !present(p.legacyLink)) symlinkSync(p.target, p.legacyLink, context.platform === "win32" ? "junction" : "dir");
+    if (claude) {
+      restore(p.claude, beforeClaude);
+      if (migrateOwnedLink && sameLink(p.link, p.target) && !present(p.legacyLink)) renameSync(p.link, p.legacyLink);
+      else if (!hadLink && sameLink(p.link, p.target)) rmSync(p.link);
+    }
+    if (claude && hadLegacyLink && !migrateOwnedLink && !present(p.legacyLink))
+      symlinkSync(p.target, p.legacyLink, context.platform === "win32" ? "junction" : "dir");
     if (claude && !hadClaudeSkill && sameLink(p.claudeSkill, p.gateTarget)) rmSync(p.claudeSkill);
     restore(p.state, oldState);
     throw error;
