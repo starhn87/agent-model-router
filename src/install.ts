@@ -13,7 +13,8 @@ export type InstallContext = {
 const LABEL = "com.agent-model-router.codex";
 const PORT = 8765;
 const CODEX_KEYS = /^\s*(model|model_provider)\s*=/;
-const PROVIDER = `[model_providers.agent_router]\nname = "Agent Model Router"\nbase_url = "http://127.0.0.1:8765"\nwire_api = "responses"\nrequires_openai_auth = true\nsupports_websockets = false\n`;
+const PROVIDER = `[model_providers.agent_router]\nname = "Jev Agent Optimizer"\nbase_url = "http://127.0.0.1:8765"\nwire_api = "responses"\nrequires_openai_auth = true\nsupports_websockets = false\n`;
+const LEGACY_PROVIDER = PROVIDER.replace('name = "Jev Agent Optimizer"', 'name = "Agent Model Router"');
 const ROOT_SETTINGS = 'model = "gpt-6-astra"\nmodel_provider = "agent_router"\n';
 const read = (path: string): string | null => existsSync(path) ? readFileSync(path, "utf8") : null;
 const present = (path: string): boolean => { try { lstatSync(path); return true; } catch { return false; } };
@@ -64,7 +65,8 @@ export function configureCodex(text: string): string {
 export function unconfigureCodex(current: string, previous: string | null): string {
   const parsed = sections(current);
   const original = sections(previous ?? "");
-  if (modelLines(parsed.head) !== ROOT_SETTINGS || parsed.provider?.trim() !== PROVIDER.trim()) {
+  if (modelLines(parsed.head) !== ROOT_SETTINGS ||
+    ![PROVIDER.trim(), LEGACY_PROVIDER.trim()].includes(parsed.provider?.trim() ?? "")) {
     throw new Error("설치 후 Codex의 라우터 설정이 변경됐습니다. 해당 설정을 먼저 확인하세요.");
   }
   let restored = modelLines(original.head);
@@ -237,7 +239,7 @@ export async function install(client: Client, context: InstallContext): Promise<
   return `${client} 설치 완료. 설정 백업: ${join(context.home, ".agent-model-router/backups")}\n` +
     (codex ? "Codex: 로그인 시 서버가 자동 시작됩니다. 앱을 재시작하고 새 작업에서 Jev Auto를 선택하세요. 검색·기억 스킬도 연결됐습니다.\n" : "") +
     (claude ? "Claude: 새 CLI/Code 탭 세션부터 자동 적용됩니다. /amr-route로 확인하세요. 검색·기억 스킬도 연결됐습니다.\n" : "") +
-    "최종 답변 아래에 실제 모델과 요청 effort가 표시됩니다. npm run doctor로 설치 상태를 확인하세요.\n";
+    "응답 시작에 선택 모델과 요청 effort가 표시되고, 실제 모델이 다를 때만 끝에 알립니다. npm run doctor로 설치 상태를 확인하세요.\n";
 }
 
 export function uninstall(client: Client, context: InstallContext): string {
@@ -270,7 +272,7 @@ export function uninstall(client: Client, context: InstallContext): string {
 
 export async function doctor(context: InstallContext): Promise<string> {
   const p = paths(context);
-  const lines = [`Agent Model Router · ${context.repo}`];
+  const lines = [`Jev Agent Optimizer · ${context.repo}`];
   if (context.customConfig?.codex || context.customConfig?.claude) {
     lines.push("주의: 사용자 지정 설정 경로가 감지되었습니다. 아래 결과는 기본 사용자 경로만 진단합니다.");
   }

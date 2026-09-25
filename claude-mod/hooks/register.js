@@ -113,15 +113,15 @@ async function routeTurn($, text) {
 }
 
 function statusOf(enabled, last) {
-  if (!enabled) return "Agent Model Router: off (set AMR_CLAUDE_AUTO=1 and restart Claude Code).";
-  if (!last) return "Agent Model Router: on; no user turn classified yet.";
+  if (!enabled) return "Jev Agent Optimizer: off (set AMR_CLAUDE_AUTO=1 and restart Claude Code).";
+  if (!last) return "Jev Agent Optimizer: on; no user turn classified yet.";
   const picked = last.model ? `${last.tier} → ${last.model} (${last.confidence})` : last.reason;
   const recommended = last.effort ? `; Jev recommended effort ${last.effort}` : "";
   const requested = last.requestedEffort ? `; requested effort ${last.requestedEffort}` : "";
   const mismatch = last.model && last.servedModel && last.servedModel !== last.model &&
     !last.servedModel.startsWith(`${last.model}-`) ? ` ≠ ${last.model}` : "";
   const served = last.servedModel ? `; API served ${last.servedModel}${mismatch}` : "";
-  return `Agent Model Router: ${picked}${recommended}${requested}${served}.`;
+  return `Jev Agent Optimizer: ${picked}${recommended}${requested}${served}.`;
 }
 
 export function register(on) {
@@ -182,15 +182,14 @@ export function register(on) {
     routes.delete(e.turnId);
     if (!enabled || !footerEnabled || !route || e.reason !== "answer" || !e.answer) return result;
     const model = e.usage?.model;
-    const safeModel = typeof model === "string" && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(model) ? model : "확인 불가";
+    if (typeof model !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(model) ||
+      typeof route.model !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(route.model) ||
+      model === route.model || model.startsWith(`${route.model}-`)) return result;
     const effort = route.requestedEffort;
     const label = typeof effort === "number" && Number.isFinite(effort) ? String(effort)
       : typeof effort === "string" && /^[a-z]+$/.test(effort) ? effort : "기본값";
     // turn.complete displays a synopsis beneath the answer without rewriting its transcript.
-    const mismatch = typeof route.model === "string" && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(route.model) &&
-      safeModel !== "확인 불가" && safeModel !== route.model &&
-      !safeModel.startsWith(`${route.model}-`) ? ` · 요청 모델: ${route.model} ≠` : "";
-    const footer = `모델: ${safeModel} · 요청 effort: ${label}${mismatch}`;
+    const footer = `모델: ${model} · 요청 effort: ${label} · 요청 모델: ${route.model} ≠`;
     return { ...result, text: result.text && result.text !== e.answer ? `${result.text}\n\n${footer}` : footer };
   });
 }

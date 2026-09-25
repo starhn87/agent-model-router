@@ -135,8 +135,7 @@ test("matching and dated API model IDs do not show a mismatch", async () => {
     const h = harness();
     await h.start("t", "Fix the spelling of this short example sentence.");
     await h.step("t");
-    assert.equal((await h.complete("t", { usage: { model } })).text,
-      `모델: ${model} · 요청 effort: xhigh`);
+    assert.equal((await h.complete("t", { usage: { model } })).text, "Answer");
   }
 });
 
@@ -155,10 +154,10 @@ test("completion leaves subagents, interruptions, disabled routing and footer op
   }
 });
 
-test("guarded turns report their effective effort; missing model is not replaced with a guess", async () => {
+test("missing served model does not claim a mismatch", async () => {
   const h = harness();
   await h.start("t", "Hi");
   await h.step("t");
   assert.equal((await h.complete("t", { usage: undefined }, "Other plugin synopsis")).text,
-    "Other plugin synopsis\n\n모델: 확인 불가 · 요청 effort: medium");
+    "Other plugin synopsis");
 });

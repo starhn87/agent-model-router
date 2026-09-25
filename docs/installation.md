@@ -29,7 +29,7 @@ model = "gpt-6-astra"
 model_provider = "agent_router"
 
 [model_providers.agent_router]
-name = "Agent Model Router"
+name = "Jev Agent Optimizer"
 base_url = "http://127.0.0.1:8765"
 wire_api = "responses"
 requires_openai_auth = true

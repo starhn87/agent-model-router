@@ -30,6 +30,9 @@ test("Codex setup preserves unrelated TOML sections, including later edits on re
   assert.match(removed, /\[new_feature\]\nenabled = true/);
   assert.equal(removed.includes("agent_router"), false);
   assert.equal(configureCodex(changed), changed);
+  const legacy = changed.replace('name = "Jev Agent Optimizer"', 'name = "Agent Model Router"');
+  assert.match(unconfigureCodex(legacy, original), /^model = "custom"\nmodel_provider = "existing"/);
+  assert.equal(configureCodex(legacy), changed);
 });
 
 test("adopted Codex install actually disables routing and conflicts never get overwritten", () => {

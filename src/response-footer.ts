@@ -10,10 +10,9 @@ function lastIndex(items: unknown[], predicate: (value: unknown) => boolean): nu
 }
 
 export function responseFooter(model: unknown, effort?: string, requestedModel?: string): string {
-  const mismatch = safeModel(model) && safeModel(requestedModel) &&
-    model !== requestedModel && !model.startsWith(`${requestedModel}-`)
-    ? ` · 요청 모델: ${requestedModel} ≠` : "";
-  return `\n\n— 모델: ${safeModel(model) ? model : "확인 불가"} · 요청 effort: ${effort && /^[a-z]+$/.test(effort) ? effort : "기본값"}${mismatch}`;
+  if (!safeModel(model) || !safeModel(requestedModel) ||
+    model === requestedModel || model.startsWith(`${requestedModel}-`)) return "";
+  return `\n\n— 모델: ${model} · 요청 effort: ${effort && /^[a-z]+$/.test(effort) ? effort : "기본값"} · 요청 모델: ${requestedModel} ≠`;
 }
 
 export function responseRoute(model?: string, effort?: string): string {
@@ -184,8 +183,11 @@ export class ResponseFooter extends Transform {
       const state = this.tails.get(key) ?? { tail: new FooterTail(), event };
       this.tails.set(key, state);
       const delta = state.tail.push(event.delta);
-      const route = delta && this.finalItems.has(event.output_index) && !this.announced
-        ? responseRoute(this.requestedModel, this.effort) : "";
+      const selectedRoute = responseRoute(this.requestedModel, this.effort);
+      const alreadyPrefixed = Boolean(selectedRoute && delta.startsWith(selectedRoute));
+      const route = delta && this.finalItems.has(event.output_index) && !this.announced && !alreadyPrefixed
+        ? selectedRoute : "";
+      if (alreadyPrefixed) { this.prefixed.add(key); this.announced = true; }
       if (route) { this.prefixed.add(key); this.announced = true; }
       if (route || delta !== event.delta) { this.emitEvent({ ...event, delta: route + delta }); return; }
     }

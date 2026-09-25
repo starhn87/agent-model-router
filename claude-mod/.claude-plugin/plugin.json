@@ -2,5 +2,5 @@
   "name": "agent-model-router",
   "version": "0.2.0",
   "description": "Model and effort routing plus search and memory selection with TypeSafe Jev",
-  "author": { "name": "Agent Model Router contributors" }
+  "author": { "name": "Jev Agent Optimizer contributors" }
 }

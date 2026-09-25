@@ -124,7 +124,7 @@ async function runServer(parsed: Parsed): Promise<void> {
     responseFooter: parsed.responseFooter,
     statusFile: parsed.metricsFile,
     classify, onDecision: (event) => writeMetric(event, parsed.metricsFile), onObservation: (event) => writeMetric(event, parsed.metricsFile) });
-  process.stdout.write(`Agent Model Router listening on http://127.0.0.1:${proxy.port}\n`);
+  process.stdout.write(`Jev Agent Optimizer listening on http://127.0.0.1:${proxy.port}\n`);
   await new Promise<void>((resolve) => {
     process.once("SIGINT", resolve);
     process.once("SIGTERM", resolve);
@@ -162,7 +162,7 @@ async function runClaudeShadowHook(parsed: Parsed): Promise<void> {
 }
 
 function help(): void {
-  process.stdout.write(`Agent Model Router\n\n` +
+  process.stdout.write(`Jev Agent Optimizer\n\n` +
     `Jev key: TYPESAFE_API_KEY in the process environment.\n` +
     `         For a local .env file, run: node --env-file=.env dist/cli.js ...\n` +
     `         macOS login Keychain is optional via the flags below.\n\n` +

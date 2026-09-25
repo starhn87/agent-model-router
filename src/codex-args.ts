@@ -12,7 +12,7 @@ export function codexArgs(baseUrl: string, baselineModel: string, args: string[]
   return [
     ...(hasManualModel ? [] : ["--model", baselineModel]),
     "--config", `model_provider="${PROVIDER}"`,
-    "--config", `model_providers.${PROVIDER}.name="Agent Model Router"`,
+    "--config", `model_providers.${PROVIDER}.name="Jev Agent Optimizer"`,
     "--config", `model_providers.${PROVIDER}.base_url="${baseUrl}"`,
     "--config", `model_providers.${PROVIDER}.wire_api="responses"`,
     "--config", `model_providers.${PROVIDER}.requires_openai_auth=true`,

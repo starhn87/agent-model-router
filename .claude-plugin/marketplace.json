@@ -1,7 +1,7 @@
 {
   "name": "agent-model-router",
   "description": "Model and effort routing plus search and memory selection for Claude Code with TypeSafe Jev.",
-  "owner": { "name": "Agent Model Router contributors" },
+  "owner": { "name": "Jev Agent Optimizer contributors" },
   "plugins": [
     {
       "name": "agent-model-router",
