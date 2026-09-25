@@ -7,6 +7,7 @@ import { codexSessionKey, estimateContextTokens, latestUserTurn, type CodexBody 
 import { CodexResponseObserver, type ObservedResponse } from "./codex-response.js";
 import { chooseModel, effortFromScore, fallbackModel, routingGuard } from "./policy.js";
 import { readRecentStatus, renderStatusPage } from "./status.js";
+import { allowsResponseFooter, ResponseFooter } from "./response-footer.js";
 import type { DecisionEvent, ResponseObservationEvent, RouteChoice, RouteQuery, RouteResult, RouterSettings } from "./types.js";
 
 const CHATGPT_CODEX_URL = "https://chatgpt.com/backend-api/codex";
@@ -21,6 +22,7 @@ export type ProxyOptions = {
   classify?: (query: RouteQuery) => Promise<RouteChoice>;
   onDecision?: (event: DecisionEvent) => void;
   onObservation?: (event: ResponseObservationEvent) => void;
+  responseFooter?: boolean;
 };
 
 type CatalogModel = {
@@ -76,6 +78,11 @@ export class CodexRouter {
 
   shouldRoute(model: unknown): boolean {
     return model === this.options.settings.baselineModel;
+  }
+
+  shouldAddFooter(body: CodexBody): boolean {
+    return this.options.responseFooter !== false && this.options.settings.mode === "auto" &&
+      this.shouldRoute(body.model) && allowsResponseFooter(body);
   }
 
   ingestCatalog(payload: unknown): unknown {
@@ -228,6 +235,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
   let requestedModel: string | undefined;
   let requestedEffort: string | undefined;
   let requestId: string | undefined;
+  let addFooter = false;
   try {
     body = await readRequest(request);
   } catch {
@@ -237,6 +245,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     try {
       const parsed = JSON.parse(body.toString("utf8"));
       if (!isRecord(parsed)) throw new Error("body is not object");
+      addFooter = router.shouldAddFooter(parsed);
       if (router.shouldRoute(parsed.model)) requestId = randomUUID();
       const routed = await router.route(parsed, requestId);
       if (requestId && typeof routed.model === "string") requestedModel = routed.model;
@@ -257,6 +266,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
   headers.host = base.host;
   delete headers["content-length"];
   if (isCatalog) delete headers["accept-encoding"];
+  if (addFooter) headers["accept-encoding"] = "identity";
   const transport = base.protocol === "http:" ? http : https;
   const upstream = transport.request({ protocol: base.protocol, hostname: base.hostname, port: base.port || undefined,
     path: targetPath, method: request.method, headers }, (upstreamResponse) => {
@@ -285,8 +295,22 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         // Codex may close the SSE connection after a completion event without waiting for EOF.
         upstreamResponse.on("close", () => record(observer.finish()));
       }
+      const contentType = String(upstreamResponse.headers["content-type"] ?? "");
+      const encoding = upstreamResponse.headers["content-encoding"];
+      const rewrite = addFooter && status >= 200 && status < 300 && (!encoding || encoding === "identity") &&
+        (!contentType || /text\/event-stream|application\/json/i.test(contentType));
+      if (rewrite) {
+        delete responseHeaders["content-length"];
+        delete responseHeaders.etag;
+        delete responseHeaders["content-md5"];
+      }
       response.writeHead(upstreamResponse.statusCode ?? 502, responseHeaders);
-      upstreamResponse.pipe(response);
+      if (rewrite) {
+        const footer = new ResponseFooter(contentType, requestedEffort);
+        footer.on("error", () => respondError(response, 502, "response stream unavailable"));
+        response.on("close", () => footer.destroy());
+        upstreamResponse.pipe(footer).pipe(response);
+      } else upstreamResponse.pipe(response);
       return;
     }
     const chunks: Buffer[] = [];

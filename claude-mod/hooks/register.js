@@ -124,10 +124,12 @@ function statusOf(enabled, last) {
 export function register(on) {
   const routes = new Map();
   let enabled = false;
+  let footerEnabled = true;
   let last = null;
 
   on("session.start", async ($, e, next) => {
     enabled = (await $.env.get("AMR_CLAUDE_AUTO")) === "1";
+    footerEnabled = (await $.env.get("AMR_RESPONSE_FOOTER")) !== "0";
     await $.command.register({ name: "amr-route", description: "Show the last Jev route and API model" });
     return next(e);
   });
@@ -153,11 +155,28 @@ export function register(on) {
     const route = e.agentId === undefined ? routes.get(e.turnId) : undefined;
     const request = route?.model || route?.effort
       ? { ...e, ...(route.model ? { model: route.model } : {}), ...(route.effort ? { effort: route.effort } : {}) } : e;
+    if (route) route.requestedEffort = request.effort;
     for await (const chunk of next(request)) {
       if (route && chunk.kind === "stop" && chunk.usage?.model) {
         route.servedModel = chunk.usage.model;
       }
       yield chunk;
     }
+  });
+
+  on("turn.complete", async ($, e, next) => {
+    const result = await next(e);
+    if (e.agentId !== undefined) return result;
+    const route = routes.get(e.turnId);
+    routes.delete(e.turnId);
+    if (!enabled || !footerEnabled || !route || e.reason !== "answer" || !e.answer) return result;
+    const model = e.usage?.model;
+    const safeModel = typeof model === "string" && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(model) ? model : "확인 불가";
+    const effort = route.requestedEffort;
+    const label = typeof effort === "number" && Number.isFinite(effort) ? String(effort)
+      : typeof effort === "string" && /^[a-z]+$/.test(effort) ? effort : "기본값";
+    // turn.complete displays a synopsis beneath the answer without rewriting its transcript.
+    const footer = `모델: ${safeModel} · 요청 effort: ${label}`;
+    return { ...result, text: result.text && result.text !== e.answer ? `${result.text}\n\n${footer}` : footer };
   });
 }

@@ -43,7 +43,10 @@ function harness({ answer = "fast", confidence = 0.95, effortScore = 2.8, env = 
     return { sent, chunks };
   };
   const status = () => hooks.get("command.run")().text;
-  return { $, requests, registered, start, step, status };
+  const complete = (turnId, extra = {}, text = "Answer") => hooks.get("turn.complete")($, {
+    turnId, reason: "answer", answer: "Answer", usage: { model: "claude-served" }, ...extra,
+  }, async () => ({ text }));
+  return { $, requests, registered, start, step, status, complete };
 }
 
 test("parses a local env file without exposing other entries", () => {
@@ -100,4 +103,35 @@ test("maps a strong decision to Opus and can be disabled for a new session", asy
   assert.equal(disabled.requests.length, 0);
   assert.equal((await disabled.step("turn-2")).sent.model, "claude-sonnet-5");
   assert.match(disabled.status(), /off/);
+});
+
+test("completion displays actual model and requested effort once, without replacing the answer", async () => {
+  const h = harness();
+  await h.start("t", "Fix the spelling of this short example sentence.");
+  await h.step("t");
+  assert.equal((await h.complete("t")).text, "모델: claude-served · 요청 effort: xhigh");
+  assert.equal((await h.complete("t")).text, "Answer");
+});
+
+test("completion leaves subagents, interruptions, disabled routing and footer opt-out alone", async () => {
+  for (const extra of [{ agentId: "subagent" }, { reason: "aborted" }, { reason: "error" }, { answer: "" }]) {
+    const h = harness();
+    await h.start("t", "Fix the spelling of this short example sentence.");
+    await h.step("t");
+    assert.equal((await h.complete("t", extra)).text, "Answer");
+  }
+  for (const env of [{ AMR_CLAUDE_AUTO: "0" }, { AMR_RESPONSE_FOOTER: "0" }]) {
+    const h = harness({ env });
+    await h.start("t", "Fix the spelling of this short example sentence.");
+    await h.step("t");
+    assert.equal((await h.complete("t")).text, "Answer");
+  }
+});
+
+test("guarded turns report their effective effort; missing model is not replaced with a guess", async () => {
+  const h = harness();
+  await h.start("t", "Hi");
+  await h.step("t");
+  assert.equal((await h.complete("t", { usage: undefined }, "Other plugin synopsis")).text,
+    "Other plugin synopsis\n\n모델: 확인 불가 · 요청 effort: medium");
 });

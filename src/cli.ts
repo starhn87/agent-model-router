@@ -14,7 +14,7 @@ import { evaluateCases, readEvaluationCases } from "./evaluate.js";
 import type { Mode, RouteChoice, RouteQuery, RouterSettings, Tier } from "./types.js";
 
 type Parsed = { settings: RouterSettings; metricsFile?: string; port?: number;
-  keychainService?: string; keychainAccount?: string; remaining: string[] };
+  keychainService?: string; keychainAccount?: string; responseFooter?: boolean; remaining: string[] };
 
 function parseOptions(args: string[]): Parsed {
   const settings = defaultSettings();
@@ -22,6 +22,7 @@ function parseOptions(args: string[]): Parsed {
   let port: number | undefined;
   let keychainService: string | undefined;
   let keychainAccount: string | undefined;
+  let responseFooter: boolean | undefined;
   let index = 0;
   while (index < args.length) {
     const flag = args[index];
@@ -33,6 +34,10 @@ function parseOptions(args: string[]): Parsed {
       if (!["pass", "force", "shadow", "auto"].includes(value)) throw new Error(`invalid mode: ${value}`);
       settings.mode = value as Mode;
     } else if (flag === "--force-model") settings.forceModel = value;
+    else if (flag === "--response-footer") {
+      if (value !== "on" && value !== "off") throw new Error("--response-footer must be on or off");
+      responseFooter = value === "on";
+    }
     else if (flag === "--baseline-model") settings.baselineModel = value;
     else if (flag === "--fast-model" || flag === "--balanced-model" || flag === "--strong-model") {
       const tier = flag.slice(2, -6) as Tier;
@@ -55,7 +60,7 @@ function parseOptions(args: string[]): Parsed {
   if (settings.minimumDowngradeConfidence !== undefined && settings.minimumDowngradeConfidence < settings.minimumConfidence) {
     throw new Error("--downgrade-confidence must be at least the minimum routing confidence");
   }
-  return { settings, metricsFile, port, keychainService, keychainAccount, remaining: args.slice(index) };
+  return { settings, metricsFile, port, keychainService, keychainAccount, responseFooter, remaining: args.slice(index) };
 }
 
 function resolveCodex(): string {
@@ -87,6 +92,7 @@ async function runCodex(parsed: Parsed): Promise<void> {
   const command = resolveCodex();
   const classify = parsed.settings.mode === "pass" || parsed.settings.mode === "force" ? undefined : await keychainClassifier(spec);
   const proxy = await startCodexProxy({ settings: parsed.settings, classify,
+    responseFooter: parsed.responseFooter,
     statusFile: parsed.metricsFile,
     onDecision: (event) => writeMetric(event, parsed.metricsFile), onObservation: (event) => writeMetric(event, parsed.metricsFile) });
   const baseUrl = `http://127.0.0.1:${proxy.port}`;
@@ -108,6 +114,7 @@ async function runServer(parsed: Parsed): Promise<void> {
   const spec = keychainSpec(parsed.keychainService, parsed.keychainAccount);
   const classify = parsed.settings.mode === "pass" || parsed.settings.mode === "force" ? undefined : await keychainClassifier(spec);
   const proxy = await startCodexProxy({ settings: parsed.settings, port: parsed.port ?? 8765,
+    responseFooter: parsed.responseFooter,
     statusFile: parsed.metricsFile,
     classify, onDecision: (event) => writeMetric(event, parsed.metricsFile), onObservation: (event) => writeMetric(event, parsed.metricsFile) });
   process.stdout.write(`Agent Model Router listening on http://127.0.0.1:${proxy.port}\n`);
@@ -160,7 +167,7 @@ function help(): void {
     `Router options: --mode pass|force|shadow|auto, --force-model ID,\n` +
     `  --baseline-model ID, --fast-model ID, --balanced-model ID,\n` +
     `  --strong-model ID, --downgrade-confidence 0..1, --metrics FILE, --port PORT,\n` +
-    `  --keychain-service NAME, --keychain-account USER\n`);
+    `  --keychain-service NAME, --keychain-account USER, --response-footer on|off\n`);
 }
 
 async function main(): Promise<void> {
