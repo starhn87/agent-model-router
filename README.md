@@ -1,6 +1,6 @@
 # Agent Model Router
 
-TypeSafe Jev가 사용자 턴을 `fast`·`balanced`·`strong`으로 분류해 Codex와 Claude Code의 응답 모델을 선택합니다. Codex CLI·데스크톱 앱, Claude Code CLI·데스크톱 **Code 탭**에서 공개 합성 문장으로 전환을 확인했습니다. Claude의 일반 채팅에는 적용되지 않습니다.
+TypeSafe Jev가 사용자 턴의 모델 등급(`fast`·`balanced`·`strong`)과 사고량(`low`부터 `max`까지)을 한 번에 판정해 Codex와 Claude Code에 적용합니다. Codex CLI·데스크톱 앱과 Claude Code CLI·데스크톱 **Code 탭**에서 사용합니다. Claude의 일반 채팅에는 적용되지 않습니다.
 
 ## 1. 설치와 키 준비
 
@@ -25,7 +25,7 @@ node --env-file=.env dist/cli.js serve --mode auto --baseline-model gpt-6-astra 
 기존 `~/.codex/config.toml`이 있다면 백업한 뒤, 파일 **최상위**의 `model`·`model_provider`를 아래 값으로 설정하고 공급자 테이블을 병합합니다. 다른 설정은 유지하세요.
 
 ```toml
-model = "agent-auto"
+model = "gpt-6-astra"
 model_provider = "agent_router"
 
 [model_providers.agent_router]
@@ -36,9 +36,9 @@ requires_openai_auth = true
 supports_websockets = false
 ```
 
-Codex 앱을 재시작하고 **새 작업**을 만드세요. CLI도 새 `codex` 세션부터 적용됩니다. 공개 예문 한 턴을 보낸 뒤 아래 명령으로 기록을 확인하세요. 모델을 수동으로 지정한 작업은 그 선택을 우선합니다. 라우터를 중지한 채 `agent-auto`를 사용하면 요청이 실패하므로, 상시 사용하려면 위 서버 명령을 로그인 시 실행되는 서비스에 등록해야 합니다.
+Codex 앱을 재시작하고 **새 작업**을 만드세요. CLI도 새 `codex` 세션부터 적용됩니다. 공개 예문 한 턴을 보낸 뒤 아래 명령으로 기록을 확인하세요. 기준 모델과 다른 모델을 수동 선택하면 라우팅을 건너뜁니다. 기준 모델을 직접 선택한 경우는 자동 요청과 구별할 수 없습니다. 라우터를 중지한 채 위 공급자 설정을 사용하면 요청이 실패하므로, 상시 사용하려면 서버 명령을 로그인 시 실행되는 서비스에 등록해야 합니다.
 
-연결과 모델 기록은 다음으로 확인합니다.
+연결과 모델·effort 요청 기록은 다음으로 확인합니다. 보고서의 `byEffort`는 라우터가 **요청한** 턴별 값입니다. Codex 시작 화면의 effort 표시는 세션 기본값일 수 있습니다.
 
 ```bash
 curl -fsS http://127.0.0.1:8765/health
@@ -66,11 +66,11 @@ ln -s "$(pwd -P)/claude-mod" "$HOME/.claude/skills/agent-model-router"
 }
 ```
 
-새 Claude Code CLI 세션이나 데스크톱 **Code 탭** 세션에서 사용하세요. `/amr-route`를 실행하면 최근 판정과 실제 응답 모델을 볼 수 있습니다. 앱의 모델 배지는 세션 모델이므로 턴별 전환 결과와 다를 수 있습니다. 함수 훅은 초기 접근 기능이므로 Claude 업데이트 후 `claude plugin validate --strict claude-mod`와 공개 예문 한 턴으로 다시 확인하세요.
+새 Claude Code CLI 세션이나 데스크톱 **Code 탭** 세션에서 사용하세요. `/amr-route`를 실행하면 최근 판정, 요청한 effort, 실제 응답 모델을 볼 수 있습니다. 앱의 모델 배지는 세션 모델이므로 턴별 전환 결과와 다를 수 있습니다. 함수 훅은 초기 접근 기능이므로 Claude 업데이트 후 `claude plugin validate --strict claude-mod`와 공개 예문 한 턴으로 다시 확인하세요.
 
 ## 사용 전 알아둘 점
 
-- 기본 매핑: Codex `fast=gpt-6-luna`, `balanced=gpt-6-sol`, `strong=gpt-6-astra`; Claude `fast=haiku`, `balanced=sonnet`, `strong=opus`.
+- 기본 매핑: Codex `fast=gpt-6-luna`, `balanced=gpt-6-sol`, `strong=gpt-6-astra`; Claude `fast=haiku`, `balanced=sonnet`, `strong=opus`. Jev의 사고량 점수는 `low`·`medium`·`high`·`xhigh`·`max` 중 하나로 적용됩니다. Codex 자동 전환에서는 선택한 모델의 지원 범위에 맞추고 기존 effort 선택을 덮어씁니다.
 - 자동 분류는 사용자 턴의 텍스트 최대 1,600자를 **유료 TypeSafe API**로 보낼 수 있습니다. 민감한 내용을 다룰 때는 자동 전환을 끄세요.
 - Codex는 `~/.codex/config.toml`의 모델·공급자를 원래 값으로 되돌리고 앱을 재시작하면 해제됩니다. Claude는 `AMR_CLAUDE_AUTO`를 `0`으로 바꾸고 새 세션을 시작하면 해제됩니다.
 - 이 저장소는 전역 설정을 자동으로 수정하지 않습니다. 합성 사례 검증 결과와 남은 한계는 [검증 기록](docs/validation-plan.md)에 있습니다.

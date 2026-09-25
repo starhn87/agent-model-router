@@ -1,6 +1,11 @@
-import type { RouteChoice, RouteQuery, RouteResult, RouterSettings } from "./types.js";
+import type { Effort, RouteChoice, RouteQuery, RouteResult, RouterSettings } from "./types.js";
 
-export const AUTO_MODEL = "agent-auto";
+const EFFORTS: readonly Effort[] = ["low", "medium", "high", "xhigh", "max"];
+
+export function effortFromScore(score: number | undefined): Effort | undefined {
+  if (typeof score !== "number" || !Number.isFinite(score) || score < 0 || score > 4) return undefined;
+  return EFFORTS[Math.round(score)];
+}
 
 export function defaultSettings(mode: RouterSettings["mode"] = "shadow"): RouterSettings {
   return {
@@ -12,6 +17,7 @@ export function defaultSettings(mode: RouterSettings["mode"] = "shadow"): Router
       strong: "gpt-6-astra",
     },
     minimumConfidence: 0.8,
+    autoEffort: true,
     maxContextTokens: 24_000,
   };
 }

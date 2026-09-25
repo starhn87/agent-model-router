@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { choiceFromJev, keyFromEnvFile, register } from "../hooks/register.js";
 
-function harness({ answer = "fast", confidence = 0.95, env = {} } = {}) {
+function harness({ answer = "fast", confidence = 0.95, effortScore = 2.8, env = {} } = {}) {
   const hooks = new Map();
   const requests = [];
   const registered = [];
@@ -18,7 +18,10 @@ function harness({ answer = "fast", confidence = 0.95, env = {} } = {}) {
     http: {
       fetch: async (url, init) => {
         requests.push({ url, init });
-        return { ok: true, text: JSON.stringify({ answers: { tier: { type: "choice", choice: answer, confidence } } }) };
+        return { ok: true, text: JSON.stringify({ answers: {
+          tier: { type: "choice", choice: answer, confidence },
+          effort: { type: "score", score: effortScore, confidence: 0.91 },
+        } }) };
       },
     },
   };
@@ -35,7 +38,7 @@ function harness({ answer = "fast", confidence = 0.95, env = {} } = {}) {
     };
     const chunks = [];
     for await (const chunk of hooks.get("turn.step")($, {
-      turnId, index: 0, model: "claude-sonnet-5", messageCount: 1, agentId,
+      turnId, index: 0, model: "claude-sonnet-5", effort: "medium", messageCount: 1, agentId,
     }, next)) chunks.push(chunk);
     return { sent, chunks };
   };
@@ -49,8 +52,9 @@ test("parses a local env file without exposing other entries", () => {
   assert.equal(keyFromEnvFile("OTHER=value"), "");
 });
 
-test("rejects malformed or low-confidence Jev answers", () => {
-  assert.equal(choiceFromJev({ answers: { tier: { type: "choice", choice: "fast", confidence: 0.79 } } }), null);
+test("rejects malformed answers while preserving independent effort on low tier confidence", () => {
+  assert.deepEqual(choiceFromJev({ answers: { tier: { type: "choice", choice: "fast", confidence: 0.79 },
+    effort: { type: "score", score: 4 } } }), { tier: "fast", confidence: 0.79, effort: "max" });
   assert.equal(choiceFromJev({ answers: { tier: { type: "choice", choice: "unknown", confidence: 0.9 } } }), null);
 });
 
@@ -61,11 +65,15 @@ test("routes every main-loop step in one turn and records the served model", asy
   const body = JSON.parse(h.requests[0].init.body);
   assert.equal(body.model, "jev-latest");
   assert.equal(body.state.user_turn, "Fix the spelling of this sentence: goodd morning.");
+  assert.equal(body.questions.effort.type, "score");
   assert.equal((await h.step("turn-1")).sent.model, "claude-haiku-4-5");
+  assert.equal((await h.step("turn-1")).sent.effort, "xhigh");
   assert.equal((await h.step("turn-1")).sent.model, "claude-haiku-4-5");
   assert.equal(h.requests.length, 1);
   assert.equal((await h.step("turn-1", "agent-1")).sent.model, "claude-sonnet-5");
+  assert.equal((await h.step("turn-1", "agent-1")).sent.effort, "medium");
   assert.match(h.status(), /API served claude-haiku-4-5/);
+  assert.match(h.status(), /requested effort xhigh/);
   assert.equal(h.registered[0].name, "amr-route");
 });
 
@@ -79,6 +87,7 @@ test("skips sensitive prompts and leaves the session model on low confidence", a
   await uncertain.start("turn-2", "Please implement this straightforward little change.");
   assert.equal(uncertain.requests.length, 1);
   assert.equal((await uncertain.step("turn-2")).sent.model, "claude-sonnet-5");
+  assert.equal((await uncertain.step("turn-2")).sent.effort, "xhigh");
 });
 
 test("maps a strong decision to Opus and can be disabled for a new session", async () => {

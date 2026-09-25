@@ -1,5 +1,3 @@
-import { AUTO_MODEL } from "./policy.js";
-
 const PROVIDER = "agent_router";
 
 export function codexChildEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -9,10 +7,10 @@ export function codexChildEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return childEnv;
 }
 
-export function codexArgs(baseUrl: string, args: string[]): string[] {
+export function codexArgs(baseUrl: string, baselineModel: string, args: string[]): string[] {
   const hasManualModel = args.some((arg) => arg === "--model" || arg === "-m" || arg.startsWith("--model="));
   return [
-    ...(hasManualModel ? [] : ["--model", AUTO_MODEL]),
+    ...(hasManualModel ? [] : ["--model", baselineModel]),
     "--config", `model_provider="${PROVIDER}"`,
     "--config", `model_providers.${PROVIDER}.name="Agent Model Router"`,
     "--config", `model_providers.${PROVIDER}.base_url="${baseUrl}"`,

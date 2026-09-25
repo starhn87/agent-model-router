@@ -4,6 +4,7 @@ const MODELS = {
   balanced: "claude-sonnet-5",
   strong: "claude-opus-5",
 };
+const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 const CONFIDENCE_FLOOR = 0.8;
 const TIMEOUT_MS = 1500;
 const MAX_PROMPT_CHARS = 1600;
@@ -26,9 +27,13 @@ export function keyFromEnvFile(contents) {
 export function choiceFromJev(body) {
   const answer = body?.answers?.tier;
   if (answer?.type !== "choice" || !Object.hasOwn(MODELS, answer.choice)) return null;
-  if (typeof answer.confidence !== "number" || !Number.isFinite(answer.confidence)) return null;
-  if (answer.confidence < CONFIDENCE_FLOOR || answer.confidence > 1) return null;
-  return { tier: answer.choice, confidence: answer.confidence };
+  if (typeof answer.confidence !== "number" || !Number.isFinite(answer.confidence) ||
+      answer.confidence < 0 || answer.confidence > 1) return null;
+  const score = body?.answers?.effort;
+  const effort = score?.type === "score" && typeof score.score === "number" &&
+    Number.isFinite(score.score) && score.score >= 0 && score.score <= 4
+    ? EFFORTS[Math.round(score.score)] : undefined;
+  return { tier: answer.choice, confidence: answer.confidence, ...(effort ? { effort } : {}) };
 }
 
 async function apiKey($) {
@@ -64,6 +69,17 @@ async function routeTurn($, text) {
           strong: "Hard debugging, architecture, high-stakes reasoning, complex cross-file changes, or ambiguous trade-offs.",
         },
       },
+      effort: {
+        type: "score",
+        instructions: "How much reasoning does this user turn require? Judge the work independently of the model tier.",
+        criteria: [
+          "Immediate answer or mechanical edit; little reasoning.",
+          "A few simple steps or a small choice.",
+          "Several steps, ordinary coding, or a meaningful judgment.",
+          "Complex debugging, planning, or interacting constraints.",
+          "Open-ended or high-stakes work requiring the deepest reasoning.",
+        ],
+      },
     },
   };
 
@@ -80,7 +96,11 @@ async function routeTurn($, text) {
     if (response === timeout) return { reason: "Jev timeout" };
     if (!response.ok) return { reason: `Jev HTTP ${response.status}` };
     const choice = choiceFromJev(JSON.parse(response.text));
-    if (!choice) return { reason: "Jev confidence below 0.8 or invalid answer" };
+    if (!choice) return { reason: "Jev answer invalid" };
+    if (choice.confidence < CONFIDENCE_FLOOR) {
+      return { tier: choice.tier, confidence: choice.confidence, effort: choice.effort,
+        reason: "Jev tier confidence below 0.8" };
+    }
     const model = choice.tier === "fast"
       ? await $.env.get("AMR_CLAUDE_FAST_MODEL") || MODELS.fast
       : choice.tier === "balanced"
@@ -96,8 +116,9 @@ function statusOf(enabled, last) {
   if (!enabled) return "Agent Model Router: off (set AMR_CLAUDE_AUTO=1 and restart Claude Code).";
   if (!last) return "Agent Model Router: on; no user turn classified yet.";
   const picked = last.model ? `${last.tier} → ${last.model} (${last.confidence})` : last.reason;
+  const effort = last.effort ? `; requested effort ${last.effort}` : "";
   const served = last.servedModel ? `; API served ${last.servedModel}` : "";
-  return `Agent Model Router: ${picked}${served}.`;
+  return `Agent Model Router: ${picked}${effort}${served}.`;
 }
 
 export function register(on) {
@@ -130,7 +151,8 @@ export function register(on) {
 
   on("turn.step", async function* ($, e, next) {
     const route = e.agentId === undefined ? routes.get(e.turnId) : undefined;
-    const request = route?.model ? { ...e, model: route.model } : e;
+    const request = route?.model || route?.effort
+      ? { ...e, ...(route.model ? { model: route.model } : {}), ...(route.effort ? { effort: route.effort } : {}) } : e;
     for await (const chunk of next(request)) {
       if (route && chunk.kind === "stop" && chunk.usage?.model) {
         route.servedModel = chunk.usage.model;

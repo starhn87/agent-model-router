@@ -30,6 +30,17 @@ export async function askJev(query: RouteQuery, options: JevOptions = {}): Promi
           strong: "Hard debugging, architecture, high-stakes reasoning, complex cross-file changes, or ambiguous trade-offs.",
         },
       },
+      effort: {
+        type: "score",
+        instructions: "How much reasoning does this user turn require? Judge the work independently of the model tier.",
+        criteria: [
+          "Immediate answer or mechanical edit; little reasoning.",
+          "A few simple steps or a small choice.",
+          "Several steps, ordinary coding, or a meaningful judgment.",
+          "Complex debugging, planning, or interacting constraints.",
+          "Open-ended or high-stakes work requiring the deepest reasoning.",
+        ],
+      },
     },
   };
 
@@ -55,10 +66,17 @@ export async function askJev(query: RouteQuery, options: JevOptions = {}): Promi
   if (typeof answer.confidence !== "number" || answer.confidence < 0 || answer.confidence > 1) {
     throw new Error("jev-confidence-invalid");
   }
+  const effort = answers?.effort as Record<string, unknown> | undefined;
+  const effortScore = effort?.type === "score" && typeof effort.score === "number" &&
+    Number.isFinite(effort.score) && effort.score >= 0 && effort.score <= 4 ? effort.score : undefined;
+  const effortConfidence = typeof effort?.confidence === "number" && Number.isFinite(effort.confidence) &&
+    effort.confidence >= 0 && effort.confidence <= 1 ? effort.confidence : undefined;
   const usage = record.usage as Record<string, unknown> | undefined;
   const inputTokens = typeof usage?.input_tokens === "number" ? usage.input_tokens : undefined;
   return {
     tier: answer.choice as Tier, confidence: answer.confidence, inputTokens,
+    ...(effortScore === undefined ? {} : { effortScore }),
+    ...(effortConfidence === undefined ? {} : { effortConfidence }),
     ...(typeof record.model === "string" ? { jevModel: record.model } : {}),
   };
 }

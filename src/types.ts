@@ -1,9 +1,12 @@
 export type Tier = "fast" | "balanced" | "strong";
 export type Mode = "pass" | "force" | "shadow" | "auto";
+export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 
 export type RouteChoice = {
   tier: Tier;
   confidence: number;
+  effortScore?: number;
+  effortConfidence?: number;
   inputTokens?: number;
   jevModel?: string;
 };
@@ -27,6 +30,7 @@ export type RouterSettings = {
   forceModel?: string;
   models: Record<Tier, string>;
   minimumConfidence: number;
+  autoEffort: boolean;
   minimumDowngradeConfidence?: number;
   maxContextTokens: number;
 };
@@ -37,6 +41,8 @@ export type DecisionEvent = {
   mode: Mode;
   result: "routed" | "kept" | "manual" | "shadow" | "error";
   model: string;
+  effort?: string;
+  recommendedEffort?: Effort;
   recommendedTier?: Tier;
   confidence?: number;
   latencyMs?: number;
@@ -51,6 +57,7 @@ export type ResponseObservationEvent = {
   kind: "response";
   requestId: string;
   requestedModel: string;
+  requestedEffort?: string;
   servedModel: string;
   inputTokens?: number;
   cachedInputTokens?: number;

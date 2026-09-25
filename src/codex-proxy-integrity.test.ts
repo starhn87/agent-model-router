@@ -4,11 +4,11 @@ import type { AddressInfo } from "node:net";
 import test, { type TestContext } from "node:test";
 import { askJev } from "./jev.js";
 import { CodexRouter, startCodexProxy, type ProxyOptions } from "./codex-proxy.js";
-import { AUTO_MODEL, defaultSettings } from "./policy.js";
+import { defaultSettings } from "./policy.js";
 import type { DecisionEvent, ResponseObservationEvent } from "./types.js";
 
 const prompt = "합성 요청의 처리 결과를 한 문장으로 정리해줘";
-const requestBody = { model: AUTO_MODEL, prompt_cache_key: "integrity-test", input: [{ role: "user", content: prompt }] };
+const requestBody = { model: "gpt-6-sol", prompt_cache_key: "integrity-test", input: [{ role: "user", content: prompt }] };
 
 async function listen(server: http.Server): Promise<number> {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));

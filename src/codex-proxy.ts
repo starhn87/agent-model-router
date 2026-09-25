@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { askJev } from "./jev.js";
 import { codexSessionKey, estimateContextTokens, latestUserTurn, type CodexBody } from "./codex-request.js";
 import { CodexResponseObserver, type ObservedResponse } from "./codex-response.js";
-import { AUTO_MODEL, chooseModel, fallbackModel, routingGuard } from "./policy.js";
+import { chooseModel, effortFromScore, fallbackModel, routingGuard } from "./policy.js";
 import type { DecisionEvent, ResponseObservationEvent, RouteChoice, RouteQuery, RouteResult, RouterSettings } from "./types.js";
 
 const CHATGPT_CODEX_URL = "https://chatgpt.com/backend-api/codex";
@@ -34,7 +34,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export class CodexRouter {
-  private readonly sessions = new Map<string, string>();
+  private readonly sessions = new Map<string, { model: string; effort?: string }>();
   private readonly catalog = new Map<string, CatalogModel>();
   private readonly classify: (query: RouteQuery) => Promise<RouteChoice>;
   private metricsWarningShown = false;
@@ -49,10 +49,10 @@ export class CodexRouter {
     } catch { this.warnMetricsFailure(); }
   }
 
-  recordObservation(requestId: string, requestedModel: string, observed: ObservedResponse): void {
+  recordObservation(requestId: string, requestedModel: string, requestedEffort: string | undefined, observed: ObservedResponse): void {
     try {
       this.options.onObservation?.({ at: new Date().toISOString(), client: "codex", kind: "response",
-        requestId, requestedModel, ...observed });
+        requestId, requestedModel, ...(requestedEffort ? { requestedEffort } : {}), ...observed });
     } catch { this.warnMetricsFailure(); }
   }
 
@@ -62,14 +62,18 @@ export class CodexRouter {
     process.stderr.write("[amr] metrics sink unavailable\n");
   }
 
-  private remember(key: string, model: string): void {
+  private remember(key: string, model: string, effort?: string): void {
     this.sessions.delete(key);
-    this.sessions.set(key, model);
+    this.sessions.set(key, { model, ...(effort ? { effort } : {}) });
     if (this.sessions.size > 100) this.sessions.delete(this.sessions.keys().next().value ?? "");
   }
 
   private allowedModels(): Set<string> | undefined {
     return this.catalog.size ? new Set(this.catalog.keys()) : undefined;
+  }
+
+  shouldRoute(model: unknown): boolean {
+    return model === this.options.settings.baselineModel;
   }
 
   ingestCatalog(payload: unknown): unknown {
@@ -79,37 +83,36 @@ export class CodexRouter {
     for (const model of models) {
       if (typeof model.slug === "string" && model.supported_in_api !== false) this.catalog.set(model.slug, model);
     }
-    if (models.some((model) => model.slug === AUTO_MODEL)) return payload;
-    const template = models.find((model) => model.slug === this.options.settings.baselineModel) ?? models[0];
-    if (!template) return payload;
-    const autoModel: CatalogModel = {
-      ...template,
-      slug: AUTO_MODEL,
-      display_name: "Agent Auto",
-      description: "Selects a model per user turn when routing is enabled.",
-      visibility: "list",
-      supported_in_api: true,
-      priority: 0,
-    };
-    return { ...payload, models: [autoModel, ...models] };
+    return payload;
   }
 
-  private adjustReasoning(body: CodexBody, model: string): void {
-    if (!isRecord(body.reasoning) || typeof body.reasoning.effort !== "string") return;
+  private effectiveEffort(model: string, requested: string | undefined): string | undefined {
+    if (!requested) return undefined;
+    if (this.options.settings.mode === "pass" || this.options.settings.mode === "shadow") return requested;
     const metadata = this.catalog.get(model);
     const levels = metadata?.supported_reasoning_levels?.map((item) => item.effort);
-    if (levels?.length && !levels.includes(body.reasoning.effort)) {
-      body.reasoning = { ...body.reasoning, effort: metadata?.default_reasoning_level ?? levels[0] };
-    }
+    if (!levels?.length || levels.includes(requested)) return requested;
+    const order = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
+    const target = order.indexOf(requested);
+    const lower = levels.filter((level) => order.indexOf(level) >= 0 && order.indexOf(level) <= target)
+      .sort((a, b) => order.indexOf(b) - order.indexOf(a));
+    return lower[0] ?? metadata?.default_reasoning_level ?? levels[0];
   }
 
   async route(body: CodexBody, requestId?: string): Promise<CodexBody> {
-    if (body.model !== AUTO_MODEL) return body; // Explicit model choices remain untouched.
-
     const { settings } = this.options;
+    if (!this.shouldRoute(body.model)) {
+      const manualKey = codexSessionKey(body);
+      if (manualKey) this.sessions.delete(manualKey);
+      return body;
+    }
     const key = codexSessionKey(body);
-    const currentModel = (key ? this.sessions.get(key) : undefined) ?? settings.baselineModel;
+    const previous = key ? this.sessions.get(key) : undefined;
+    const currentModel = previous?.model ?? settings.baselineModel;
     const turn = latestUserTurn(body);
+    const incomingEffort = isRecord(body.reasoning) && typeof body.reasoning.effort === "string"
+      ? body.reasoning.effort : undefined;
+    let selectedEffort = turn ? incomingEffort : previous?.effort ?? incomingEffort;
     let result: RouteResult = { model: currentModel, reason: "tool-continuation" };
 
     if (turn) {
@@ -129,6 +132,7 @@ export class CodexRouter {
         void this.classify(query).then((choice) => {
           const recommendation = chooseModel(query, choice, settings, this.allowedModels());
           this.report({ result: "shadow", model: currentModel, recommendedTier: recommendation.tier,
+            ...(settings.autoEffort ? { recommendedEffort: effortFromScore(choice.effortScore) } : {}),
             confidence: recommendation.confidence, latencyMs: Date.now() - started, jevInputTokens: choice.inputTokens, reason: recommendation.reason }, requestId);
         }).catch(() => {
           this.report({ result: "error", model: currentModel, latencyMs: Date.now() - started, reason: "jev-unavailable" }, requestId);
@@ -139,22 +143,29 @@ export class CodexRouter {
         try {
           const choice = await this.classify(query);
           result = chooseModel(query, choice, settings, this.allowedModels());
+          if (settings.autoEffort) selectedEffort = effortFromScore(choice.effortScore) ?? selectedEffort;
           this.report({ result: result.model === currentModel ? "kept" : "routed", model: result.model,
+            effort: this.effectiveEffort(result.model, selectedEffort),
             recommendedTier: result.tier, confidence: result.confidence, latencyMs: Date.now() - started,
             jevInputTokens: choice.inputTokens, reason: result.reason }, requestId);
         } catch {
           result = { model: fallbackModel(currentModel, settings), reason: "jev-unavailable" };
-          this.report({ result: "error", model: result.model, latencyMs: Date.now() - started, reason: result.reason }, requestId);
+          this.report({ result: "error", model: result.model, effort: this.effectiveEffort(result.model, selectedEffort),
+            latencyMs: Date.now() - started, reason: result.reason }, requestId);
         }
       }
-      if (key) this.remember(key, result.model);
       if (settings.mode === "pass" || settings.mode === "force" || guard) {
-        this.report({ result: result.model === currentModel ? "kept" : "routed", model: result.model, reason: result.reason }, requestId);
+        this.report({ result: result.model === currentModel ? "kept" : "routed", model: result.model,
+          effort: this.effectiveEffort(result.model, selectedEffort), reason: result.reason }, requestId);
       }
     }
 
-    const routed = { ...body, model: result.model };
-    if (result.model !== body.model) this.adjustReasoning(routed, result.model);
+    const effectiveEffort = this.effectiveEffort(result.model, selectedEffort);
+    if (turn && key) this.remember(key, result.model, effectiveEffort);
+    const routed: CodexBody = { ...body, model: result.model };
+    if (effectiveEffort && effectiveEffort !== incomingEffort) {
+      routed.reasoning = { ...(isRecord(body.reasoning) ? body.reasoning : {}), effort: effectiveEffort };
+    }
     return routed;
   }
 }
@@ -201,6 +212,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
   const isCatalog = request.method === "GET" && /^\/(?:v1\/)?models(?:\?|$)/.test(rawPath);
   let body: Buffer;
   let requestedModel: string | undefined;
+  let requestedEffort: string | undefined;
   let requestId: string | undefined;
   try {
     body = await readRequest(request);
@@ -211,9 +223,12 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     try {
       const parsed = JSON.parse(body.toString("utf8"));
       if (!isRecord(parsed)) throw new Error("body is not object");
-      if (parsed.model === AUTO_MODEL) requestId = randomUUID();
+      if (router.shouldRoute(parsed.model)) requestId = randomUUID();
       const routed = await router.route(parsed, requestId);
       if (requestId && typeof routed.model === "string") requestedModel = routed.model;
+      if (requestId && isRecord(routed.reasoning) && typeof routed.reasoning.effort === "string") {
+        requestedEffort = routed.reasoning.effort;
+      }
       body = Buffer.from(JSON.stringify(routed));
     } catch {
       return respondError(response, 400, "invalid response request");
@@ -246,7 +261,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         const record = (observed: ObservedResponse | null): void => {
           if (!observed || recorded) return;
           recorded = true;
-          router.recordObservation(requestId!, requestedModel!, observed);
+          router.recordObservation(requestId!, requestedModel!, requestedEffort, observed);
         };
         upstreamResponse.on("data", (chunk: Buffer) => {
           observer.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));

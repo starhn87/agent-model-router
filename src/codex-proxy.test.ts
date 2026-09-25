@@ -3,7 +3,7 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
 import { CodexRouter, startCodexProxy } from "./codex-proxy.js";
-import { AUTO_MODEL, defaultSettings } from "./policy.js";
+import { defaultSettings } from "./policy.js";
 import type { CodexBody } from "./codex-request.js";
 
 const catalog = {
@@ -15,13 +15,13 @@ const catalog = {
 };
 
 function userBody(prompt = "이 오류의 원인과 수정 방법을 분석해줘", key = "conversation-1"): CodexBody {
-  return { model: AUTO_MODEL, client_metadata: { thread_id: key }, prompt_cache_key: key, input: [
+  return { model: "gpt-6-sol", client_metadata: { thread_id: key }, prompt_cache_key: key, input: [
     { role: "user", content: [{ type: "input_text", text: prompt }] },
     { type: "additional_tools" },
   ], reasoning: { effort: "ultra" } };
 }
 
-test("force mode forwards ChatGPT headers, injects Auto model, and preserves SSE", async (context) => {
+test("force mode forwards ChatGPT headers, keeps the real model catalog, and preserves SSE", async (context) => {
   const requests: { path: string; authorization?: string; body: string }[] = [];
   const upstream = http.createServer(async (request, response) => {
     const chunks: Buffer[] = [];
@@ -46,7 +46,7 @@ test("force mode forwards ChatGPT headers, injects Auto model, and preserves SSE
 
   const modelsResponse = await fetch(`http://127.0.0.1:${proxy.port}/models`, { headers: { authorization: "Bearer test-only" } });
   const models = await modelsResponse.json() as typeof catalog;
-  assert.equal(models.models[0]?.slug, AUTO_MODEL);
+  assert.deepEqual(models, catalog);
 
   const response = await fetch(`http://127.0.0.1:${proxy.port}/responses`, {
     method: "POST", headers: { authorization: "Bearer test-only", "content-type": "application/json" }, body: JSON.stringify(userBody()),
@@ -67,11 +67,40 @@ test("auto mode classifies each new turn once and pins tool continuations", asyn
   } });
   router.ingestCatalog(catalog);
   assert.equal((await router.route(userBody())).model, "gpt-6-astra");
-  const continuation = { model: AUTO_MODEL, client_metadata: { thread_id: "conversation-1" }, prompt_cache_key: "conversation-1", input: [{ type: "function_call_output", output: "done" }] };
+  const continuation = { model: "gpt-6-sol", client_metadata: { thread_id: "conversation-1" }, prompt_cache_key: "conversation-1", input: [{ type: "function_call_output", output: "done" }] };
   assert.equal((await router.route(continuation)).model, "gpt-6-astra");
   assert.equal(calls, 1);
   assert.equal((await router.route(userBody("다음 버그도 분석하고 수정해줘"))).model, "gpt-6-luna");
   assert.equal(calls, 2);
+});
+
+test("auto mode chooses supported effort with Jev and pins it through tool calls", async () => {
+  let calls = 0;
+  const decisions: { effort?: string; model: string }[] = [];
+  const router = new CodexRouter({ settings: defaultSettings("auto"), classify: async () => {
+    calls += 1;
+    return calls === 1
+      ? { tier: "fast", confidence: 0.99, effortScore: 0.2 }
+      : { tier: "strong", confidence: 0.99, effortScore: 3.8 };
+  }, onDecision: (event) => decisions.push({ model: event.model, effort: event.effort }) });
+  router.ingestCatalog({ models: [
+    { slug: "gpt-6-sol", supported_reasoning_levels: [{ effort: "low" }, { effort: "medium" }] },
+    { slug: "gpt-6-luna", supported_reasoning_levels: [{ effort: "low" }, { effort: "medium" }] },
+    { slug: "gpt-6-astra", supported_reasoning_levels: [{ effort: "high" }, { effort: "max" }] },
+  ] });
+  const first = await router.route(userBody());
+  assert.equal(first.model, "gpt-6-luna");
+  assert.equal((first.reasoning as { effort: string }).effort, "low");
+  const continuation = { model: "gpt-6-sol", client_metadata: { thread_id: "conversation-1" },
+    input: [{ type: "function_call_output", output: "done" }], reasoning: { effort: "xhigh" } };
+  const continued = await router.route(continuation);
+  assert.equal(continued.model, "gpt-6-luna");
+  assert.equal((continued.reasoning as { effort: string }).effort, "low");
+  const second = await router.route(userBody("이 복잡한 오류의 원인을 분석해줘"));
+  assert.equal(second.model, "gpt-6-astra");
+  assert.equal((second.reasoning as { effort: string }).effort, "max");
+  assert.equal(calls, 2);
+  assert.deepEqual(decisions, [{ model: "gpt-6-luna", effort: "low" }, { model: "gpt-6-astra", effort: "max" }]);
 });
 
 test("shadow mode never blocks the upstream request or changes its model", async () => {
@@ -83,6 +112,15 @@ test("shadow mode never blocks the upstream request or changes its model", async
   assert.equal(result.model, "gpt-6-sol");
 });
 
+test("pass and shadow preserve the requested effort without catalog adjustment", async () => {
+  for (const mode of ["pass", "shadow"] as const) {
+    const router = new CodexRouter({ settings: defaultSettings(mode), classify: () => new Promise(() => {}) });
+    router.ingestCatalog(catalog);
+    const body = { ...userBody(), reasoning: { effort: "xhigh" } };
+    assert.deepEqual(await router.route(body), body);
+  }
+});
+
 test("Jev failures keep the current model and manually selected models bypass routing", async () => {
   let calls = 0;
   const router = new CodexRouter({ settings: defaultSettings("auto"), classify: async () => { calls += 1; throw new Error("secret message"); } });
@@ -90,6 +128,17 @@ test("Jev failures keep the current model and manually selected models bypass ro
   const manual = { ...userBody(), model: "gpt-6-astra" };
   assert.deepEqual(await router.route(manual), manual);
   assert.equal(calls, 1);
+});
+
+test("manual model selection clears stale automatic routing state", async () => {
+  const router = new CodexRouter({ settings: defaultSettings("auto"),
+    classify: async () => ({ tier: "fast", confidence: 0.99, effortScore: 0 }) });
+  assert.equal((await router.route(userBody())).model, "gpt-6-luna");
+  const manual = { ...userBody(), model: "gpt-6-astra" };
+  assert.deepEqual(await router.route(manual), manual);
+  const continuation = { model: "gpt-6-sol", client_metadata: { thread_id: "conversation-1" },
+    input: [{ type: "function_call_output", output: "done" }] };
+  assert.equal((await router.route(continuation)).model, "gpt-6-sol");
 });
 
 test("multimodal turn stays on current model and never reaches Jev", async () => {
@@ -105,7 +154,7 @@ test("force mode pins tool continuations without contacting Jev", async () => {
   const router = new CodexRouter({ settings, classify: async () => { calls += 1; throw new Error("unexpected classification"); } });
   router.ingestCatalog(catalog);
   assert.equal((await router.route(userBody())).model, "gpt-6-luna");
-  const continuation = { model: AUTO_MODEL, client_metadata: { thread_id: "conversation-1" }, prompt_cache_key: "conversation-1", input: [{ type: "custom_tool_call_output", output: "done" }] };
+  const continuation = { model: "gpt-6-sol", client_metadata: { thread_id: "conversation-1" }, prompt_cache_key: "conversation-1", input: [{ type: "custom_tool_call_output", output: "done" }] };
   assert.equal((await router.route(continuation)).model, "gpt-6-luna");
   assert.equal(calls, 0);
 });
@@ -117,7 +166,7 @@ test("auto transitions balanced to fast to balanced while keeping sessions isola
   router.ingestCatalog(catalog);
   assert.equal((await router.route(userBody())).model, "gpt-6-sol");
   assert.equal((await router.route(userBody("이 세 문장을 한 문장으로 요약해줘"))).model, "gpt-6-luna");
-  const continuation = { model: AUTO_MODEL, client_metadata: { thread_id: "conversation-1" }, prompt_cache_key: "conversation-1", input: [{ type: "function_call_output", output: "done" }] };
+  const continuation = { model: "gpt-6-sol", client_metadata: { thread_id: "conversation-1" }, prompt_cache_key: "conversation-1", input: [{ type: "function_call_output", output: "done" }] };
   assert.equal((await router.route({ ...continuation, client_metadata: { thread_id: "conversation-2" } })).model, "gpt-6-sol");
   assert.equal((await router.route(continuation)).model, "gpt-6-luna");
   assert.equal((await router.route(userBody("이 오류의 원인과 수정 방법을 분석해줘"))).model, "gpt-6-sol");
@@ -128,7 +177,7 @@ test("shared cache keys and missing conversation IDs cannot inherit another thre
   const router = new CodexRouter({ settings: defaultSettings("auto"), classify: async () => ({ tier: "fast", confidence: 0.95 }) });
   const first = { ...userBody(), prompt_cache_key: "shared-cache" };
   const second = { ...userBody(), client_metadata: { thread_id: "conversation-2" }, prompt_cache_key: "shared-cache" };
-  const continuation = { model: AUTO_MODEL, prompt_cache_key: "shared-cache", input: [{ type: "function_call_output", output: "done" }] };
+  const continuation = { model: "gpt-6-sol", prompt_cache_key: "shared-cache", input: [{ type: "function_call_output", output: "done" }] };
   assert.equal((await router.route(first)).model, "gpt-6-luna");
   assert.equal((await router.route({ ...continuation, client_metadata: second.client_metadata })).model, "gpt-6-sol");
   assert.equal((await router.route({ ...continuation, client_metadata: { thread_id: "conversation-1" } })).model, "gpt-6-luna");
@@ -143,7 +192,7 @@ test("uncertain turns after fast return to baseline while tool continuations sta
     if (calls === 4) throw new Error("synthetic outage");
     return { tier: "fast", confidence: 0.95 };
   } });
-  const continuation = { model: AUTO_MODEL, client_metadata: { thread_id: "conversation-1" }, prompt_cache_key: "conversation-1", input: [{ type: "function_call_output", output: "done" }] };
+  const continuation = { model: "gpt-6-sol", client_metadata: { thread_id: "conversation-1" }, prompt_cache_key: "conversation-1", input: [{ type: "function_call_output", output: "done" }] };
   assert.equal((await router.route(userBody())).model, "gpt-6-luna");
   assert.equal((await router.route(continuation)).model, "gpt-6-luna");
   assert.equal((await router.route(userBody("복잡한 결제 오류의 원인과 대응을 분석해줘"))).model, "gpt-6-sol");

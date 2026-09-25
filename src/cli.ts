@@ -93,7 +93,7 @@ async function runCodex(parsed: Parsed): Promise<void> {
     process.stderr.write("[amr] No TypeSafe key; Auto will retain the current model.\n");
   }
   process.stderr.write(`[amr] Codex ${parsed.settings.mode} mode · local proxy ${baseUrl}\n`);
-  const args = codexArgs(baseUrl, parsed.remaining);
+  const args = codexArgs(baseUrl, parsed.settings.baselineModel, parsed.remaining);
   const exitCode = await new Promise<number>((resolve) => {
     const child = spawn(command, args, { stdio: "inherit", env: codexChildEnv(process.env) });
     child.once("error", () => resolve(1));
