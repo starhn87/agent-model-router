@@ -16,7 +16,7 @@ const envFile = process.env.AMR_ENV_FILE || join(sourceRoot, ".env");
 const root = process.env.AMR_ENV_FILE ? dirname(resolve(envFile)) : sourceRoot;
 const cli = join(root, "dist/cli.js");
 if (!existsSync(cli) || !existsSync(envFile)) {
-  process.stderr.write("[amr] Router build or local key file unavailable; continue without Jev gate.\n");
+  process.stderr.write("[jao] Router build or local key file unavailable; continue without Jev gate.\n");
   process.exit(2);
 }
 
@@ -27,5 +27,5 @@ const result = spawnSync(process.execPath, [`--env-file=${envFile}`, cli, comman
 });
 if (result.stdout) process.stdout.write(result.stdout);
 if (result.stderr) process.stderr.write(result.stderr);
-if (result.error) process.stderr.write("[amr] Jev gate could not start; continue normally.\n");
+if (result.error) process.stderr.write("[jao] Jev gate could not start; continue normally.\n");
 process.exit(result.status ?? 1);

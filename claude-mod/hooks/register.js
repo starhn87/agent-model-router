@@ -133,11 +133,11 @@ export function register(on) {
   on("session.start", async ($, e, next) => {
     enabled = (await $.env.get("AMR_CLAUDE_AUTO")) === "1";
     footerEnabled = (await $.env.get("AMR_RESPONSE_FOOTER")) !== "0";
-    await $.command.register({ name: "amr-route", description: "Show the last Jev route and API model" });
+    await $.command.register({ name: "jao-route", description: "Show the last Jev route and API model" });
     return next(e);
   });
 
-  on("command.run", { command: "amr-route" }, () => ({ text: statusOf(enabled, last) }));
+  on("command.run", { command: "jao-route" }, () => ({ text: statusOf(enabled, last) }));
 
   on("turn.start", async ($, e, next) => {
     if (enabled) {

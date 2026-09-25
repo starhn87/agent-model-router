@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
@@ -54,6 +54,7 @@ test("Claude setup and removal merge only managed env keys and adopt existing au
   assert.equal(removed.theme, "dark");
   assert.deepEqual(removed.permissions, { allow: ["Read"] });
   assert.throws(() => configureClaude('{"enabledPlugins":{"agent-model-router@amr":true}}', "/repo"), /마켓플레이스/);
+  assert.throws(() => configureClaude('{"enabledPlugins":{"jev-agent-optimizer@jev-agent-optimizer":true}}', "/repo"), /마켓플레이스/);
 });
 
 test("Claude install is idempotent, stores private backups and removes cleanly", async (t) => {
@@ -63,24 +64,38 @@ test("Claude install is idempotent, stores private backups and removes cleanly",
   const firstState = h.get(".agent-model-router/install.json");
   await install("claude", h.context);
   assert.equal(h.get(".agent-model-router/install.json"), firstState);
-  assert.ok(lstatSync(join(h.context.home, ".claude/skills/agent-model-router")).isSymbolicLink());
+  assert.ok(lstatSync(join(h.context.home, ".claude/skills/jev-agent-optimizer")).isSymbolicLink());
   assert.ok(lstatSync(join(h.context.home, ".claude/skills/agent-context-gates")).isSymbolicLink());
   assert.equal(lstatSync(join(h.context.home, ".agent-model-router/install.json")).mode & 0o777, 0o600);
   const settings = JSON.parse(h.get(".claude/settings.json")); settings.theme = "dark";
   h.put(".claude/settings.json", JSON.stringify(settings));
   uninstall("claude", h.context);
   assert.deepEqual(JSON.parse(h.get(".claude/settings.json")), { env: { OTHER: "preserved" }, theme: "dark" });
-  assert.equal(existsSync(join(h.context.home, ".claude/skills/agent-model-router")), false);
+  assert.equal(existsSync(join(h.context.home, ".claude/skills/jev-agent-optimizer")), false);
   assert.equal(existsSync(join(h.context.home, ".claude/skills/agent-context-gates")), false);
 });
 
 test("both install validates before mutations and handles an existing unrelated plugin safely", async (t) => {
   const h = fixture(t);
   h.put(".claude/skills/agent-model-router/user-file", "keep me");
-  await assert.rejects(install("both", h.context), /다른 파일/);
+  await assert.rejects(install("both", h.context), /기존 Claude/);
   assert.equal(h.get(".claude/skills/agent-model-router/user-file"), "keep me");
   assert.equal(existsSync(join(h.context.home, ".codex/config.toml")), false);
   assert.equal(h.calls.some((args) => args[0] === "launchctl"), false);
+});
+
+test("existing Claude plugin link migrates to the new ID and remains removable", async (t) => {
+  const h = fixture(t);
+  await install("claude", h.context);
+  const current = join(h.context.home, ".claude/skills/jev-agent-optimizer");
+  const legacy = join(h.context.home, ".claude/skills/agent-model-router");
+  rmSync(current);
+  symlinkSync(join(h.context.repo, "claude-mod"), legacy, "dir");
+  await install("claude", h.context);
+  assert.equal(existsSync(legacy), false);
+  assert.ok(lstatSync(current).isSymbolicLink());
+  uninstall("claude", h.context);
+  assert.equal(existsSync(current), false);
 });
 
 test("both install runs service before redirecting Codex, and disable preserves unrelated changes", async (t) => {

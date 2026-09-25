@@ -68,7 +68,7 @@ export class CodexRouter {
   private warnMetricsFailure(): void {
     if (this.metricsWarningShown) return;
     this.metricsWarningShown = true;
-    process.stderr.write("[amr] metrics sink unavailable\n");
+    process.stderr.write("[jao] metrics sink unavailable\n");
   }
 
   private remember(key: string, model: string, taskId: string, effort?: string): void {

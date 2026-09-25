@@ -47,7 +47,7 @@ Auto effort 메뉴 검토: 설치된 Codex `0.155.0-alpha.16.4`의 app-server는
 
 ## 2. Jev 추천 품질
 
-`fixtures/routing-cases.json`의 합성 사례를 시작점으로, 실제 사용에 가까운 한국어 턴 최소 30개를 사람이 먼저 독립적으로 등급 판정한다. `amr evaluate`의 결과와 비교한다.
+`fixtures/routing-cases.json`의 합성 사례를 시작점으로, 실제 사용에 가까운 한국어 턴 최소 30개를 사람이 먼저 독립적으로 등급 판정한다. `jao evaluate`의 결과와 비교한다.
 
 초기 등급 부여 사례는 10개다. 추가로 [판정 후보 30개](../fixtures/routing-candidates.json)를 준비했지만 `expectedTier`는 모두 비워 두었다. 이 후보는 아직 사람이 독립 판정한 자료가 아니므로 정확도 목표의 근거로 사용할 수 없다.
 

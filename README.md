@@ -1,15 +1,15 @@
 # Jev Agent Optimizer
 
 Codex와 Claude Code에서 모델·effort를 자동 선택하고, 검색·기억 후보 선별을 돕습니다.
-기존 설치와 호환되도록 저장소 주소, 플러그인 ID, `amr` 명령과 `AMR_*` 설정 이름은 유지합니다.
+명령 이름은 `jao`입니다. 기존 설치는 `npm run setup`으로 새 플러그인 ID에 맞춰 갱신합니다.
 
 ## 설치
 
 필요 항목: macOS, Node.js 22 이상, Codex 또는 Claude Code, TypeSafe API 키.
 
 ```bash
-git clone https://github.com/starhn87/agent-model-router.git
-cd agent-model-router
+git clone https://github.com/starhn87/jev-agent-optimizer.git
+cd jev-agent-optimizer
 npm ci
 cp -n .env.example .env
 open -e .env
@@ -21,6 +21,8 @@ open -e .env
 npm run setup
 npm run doctor
 ```
+
+CLI 명령을 직접 쓰려면 `npm link` 후 `jao doctor`를 실행하세요.
 
 사용량 요약:
 

@@ -53,8 +53,8 @@ node --env-file=.env dist/cli.js codex --mode auto --baseline-model gpt-6-astra 
 새로운 설치를 마켓플레이스 방식으로 진행한다면:
 
 ```bash
-claude plugin marketplace add starhn87/agent-model-router
-claude plugin install agent-model-router@agent-model-router
+claude plugin marketplace add starhn87/jev-agent-optimizer
+claude plugin install jev-agent-optimizer@jev-agent-optimizer
 ```
 
 게시 전 로컬 목록을 검사하려면 저장소 루트에서 `claude plugin validate .`를 실행하세요. 로컬 목록 자체를 설치하려면 `claude plugin marketplace add .` 이후 같은 `plugin install` 명령을 사용할 수 있습니다. **로컬 연결 방식으로 이미 설치했다면 `npm run disable -- claude`로 먼저 해제**하세요.
@@ -74,20 +74,20 @@ claude plugin install agent-model-router@agent-model-router
 }
 ```
 
-새 CLI 또는 데스크톱 Code 탭 세션을 시작하세요. `/amr-route`가 등록되고 새 요청 뒤 판정·API 모델이 나오면 적용된 것입니다. `AMR_CLAUDE_AUTO=0`은 자동 라우팅 해제, `AMR_RESPONSE_FOOTER=0`은 요약 표시만 해제합니다.
+새 CLI 또는 데스크톱 Code 탭 세션을 시작하세요. `/jao-route`가 등록되고 새 요청 뒤 판정·API 모델이 나오면 적용된 것입니다. `AMR_CLAUDE_AUTO=0`은 자동 라우팅 해제, `AMR_RESPONSE_FOOTER=0`은 요약 표시만 해제합니다.
 
-마켓플레이스로 설치한 플러그인은 `claude plugin uninstall agent-model-router@agent-model-router`로 제거하세요. `npm run disable`은 로컬 연결 방식만 관리합니다.
+마켓플레이스로 설치한 플러그인은 `claude plugin uninstall jev-agent-optimizer@jev-agent-optimizer`로 제거하세요. `npm run disable`은 로컬 연결 방식만 관리합니다.
 
 공식 문서: [마켓플레이스](https://code.claude.com/docs/en/plugin-marketplaces), [초기 접근 함수 훅과 타입](https://github.com/anthropics/claude-code/tree/main/mods). 함수 훅 활성화가 허용되지 않는 버전이나 조직 환경에서는 이 라우터가 동작하지 않습니다.
 
 ## Windows Claude 수동 설치
 
-`claude-mod` 폴더를 사용자 `.claude/skills/agent-model-router`에 복사하고, 위의 환경변수를 병합하세요. `AMR_ENV_FILE`에는 실제 Windows 절대 경로를 JSON의 역슬래시 이스케이프 규칙에 맞게 입력하세요. 업데이트할 때 플러그인 폴더를 새 버전으로 교체합니다. Windows 자동 설치는 검증하지 않았습니다.
+`claude-mod` 폴더를 사용자 `.claude/skills/jev-agent-optimizer`에 복사하고, 위의 환경변수를 병합하세요. `AMR_ENV_FILE`에는 실제 Windows 절대 경로를 JSON의 역슬래시 이스케이프 규칙에 맞게 입력하세요. 업데이트할 때 플러그인 폴더를 새 버전으로 교체합니다. Windows 자동 설치는 검증하지 않았습니다.
 
 ## 확인 순서
 
 1. `npm run doctor`로 키 설정 유무·플러그인 연결·공급자·서버 응답을 확인합니다. 키 값은 출력하지 않습니다.
 2. Codex는 새 작업에서 Jev Auto를 선택합니다. 예전 작업의 모델 선택만 바꿔서는 공급자가 변경되지 않을 수 있습니다.
-3. Claude는 새 Code 세션에서 `/amr-route`를 확인합니다. 일반 Chat 탭과 세션 모델 배지는 턴별 라우팅 확인 수단이 아닙니다.
+3. Claude는 새 Code 세션에서 `/jao-route`를 확인합니다. 일반 Chat 탭과 세션 모델 배지는 턴별 라우팅 확인 수단이 아닙니다.
 4. Codex 서버가 구버전이면 `npm run setup -- codex`로 재시작합니다. 재시작 중에는 실행 중인 라우터 요청이 끊길 수 있으므로 작업이 끝난 뒤 실행하세요.
 5. 필요한 경우에만 [상태 화면](http://127.0.0.1:8765/status)과 `.local/router.stderr.log`를 확인합니다. 서버 로그나 키가 포함된 전체 설정을 공개하지 마세요.

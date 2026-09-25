@@ -79,7 +79,7 @@ test("routes every main-loop step in one turn and records the served model", asy
   assert.match(h.status(), /API served claude-haiku-4-5/);
   assert.match(h.status(), /Jev recommended effort xhigh; requested effort xhigh/);
   assert.match(h.status(), /requested effort xhigh/);
-  assert.equal(h.registered[0].name, "amr-route");
+  assert.equal(h.registered[0].name, "jao-route");
 });
 
 test("skips sensitive prompts and leaves the session model on low confidence", async () => {

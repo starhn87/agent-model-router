@@ -1,10 +1,10 @@
 {
-  "name": "agent-model-router",
+  "name": "jev-agent-optimizer",
   "version": "0.2.0",
   "private": true,
   "type": "module",
   "bin": {
-    "amr": "./dist/cli.js"
+    "jao": "./dist/cli.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

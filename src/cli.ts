@@ -104,9 +104,9 @@ async function runCodex(parsed: Parsed): Promise<void> {
     onDecision: (event) => writeMetric(event, parsed.metricsFile), onObservation: (event) => writeMetric(event, parsed.metricsFile) });
   const baseUrl = `http://127.0.0.1:${proxy.port}`;
   if (parsed.settings.mode === "auto" && !spec && !process.env.TYPESAFE_API_KEY && !process.env.JEV_API_KEY) {
-    process.stderr.write("[amr] No TypeSafe key; Auto will retain the current model.\n");
+    process.stderr.write("[jao] No TypeSafe key; Auto will retain the current model.\n");
   }
-  process.stderr.write(`[amr] Codex ${parsed.settings.mode} mode · local proxy ${baseUrl}\n`);
+  process.stderr.write(`[jao] Codex ${parsed.settings.mode} mode · local proxy ${baseUrl}\n`);
   const args = codexArgs(baseUrl, parsed.settings.baselineModel, parsed.remaining);
   const exitCode = await new Promise<number>((resolve) => {
     const child = spawn(command, args, { stdio: "inherit", env: codexChildEnv(process.env) });
@@ -166,21 +166,20 @@ function help(): void {
     `Jev key: TYPESAFE_API_KEY in the process environment.\n` +
     `         For a local .env file, run: node --env-file=.env dist/cli.js ...\n` +
     `         macOS login Keychain is optional via the flags below.\n\n` +
-    `  amr install [both|codex|claude]  (Codex background setup: macOS)\n` +
-    `  amr doctor\n` +
-    `  amr uninstall [both|codex|claude]\n\n` +
-    `  amr codex [router options] -- [codex arguments]\n` +
-    `  amr serve [router options]  (for Codex desktop; default port 8765; /status with --metrics)\n` +
-    `  amr claude-shadow-hook --metrics FILE [--keychain-service NAME --keychain-account USER]\n` +
-    `  amr report FILE\n\n` +
-    `  amr compare FILE  (paired fixed and auto results; no model calls)\n` +
-    `  amr search FILE|- [--metrics FILE]  (search-result decision; up to two paid Jev calls)\n` +
-    `  amr search-report FILE\n` +
-    `  amr search-evaluate FILE  (human-labelled needed-source recall)\n` +
-    `  amr memory-filter FILE|- [--metrics FILE]  (passage selection; up to one paid Jev call)\n` +
-    `  amr memory-report FILE\n` +
-    `  amr memory-evaluate FILE  (human-labelled needed-passage recall)\n` +
-    `  amr evaluate FILE --max-calls N [--keychain-service NAME --keychain-account USER]  (paid Jev calls)\n\n` +
+    `  jao install [both|codex|claude]  (Codex background setup: macOS)\n` +
+    `  jao doctor\n` +
+    `  jao uninstall [both|codex|claude]\n\n` +
+    `  jao codex [router options] -- [codex arguments]\n` +
+    `  jao serve [router options]  (for Codex desktop; default port 8765; /status with --metrics)\n` +
+    `  jao claude-shadow-hook --metrics FILE [--keychain-service NAME --keychain-account USER]\n` +
+    `  jao report FILE\n\n` +
+    `  jao compare FILE  (paired fixed and auto results; no model calls)\n` +
+    `  jao search FILE|- [--metrics FILE]  (search-result decision; up to two paid Jev calls)\n` +
+    `  jao search-report FILE\n` +
+    `  jao search-evaluate FILE  (human-labelled needed-source recall)\n` +
+    `  jao memory-filter FILE|- [--metrics FILE]  (passage selection; up to one paid Jev call)\n` +
+    `  jao memory-report FILE\n` +
+    `  jao memory-evaluate FILE  (human-labelled needed-passage recall)\n` +
     `Router options: --mode pass|force|shadow|auto, --force-model ID,\n` +
     `  --baseline-model ID, --fast-model ID, --balanced-model ID,\n` +
     `  --strong-model ID, --downgrade-confidence 0..1, --metrics FILE, --port PORT,\n` +
@@ -193,7 +192,7 @@ async function main(): Promise<void> {
   if (command === "install" || command === "uninstall" || command === "doctor") {
     const client = args[0] ?? "both";
     if ((command === "doctor" && args.length) || args.length > 1 || !["both", "codex", "claude"].includes(client)) {
-      throw new Error("사용법: amr install|uninstall [both|codex|claude], amr doctor");
+      throw new Error("사용법: jao install|uninstall [both|codex|claude], jao doctor");
     }
     const context = defaultInstallContext();
     process.stdout.write(command === "doctor" ? await doctor(context)
@@ -231,7 +230,7 @@ async function main(): Promise<void> {
     const result = await searchGate(input, ask);
     if (options.has("--metrics")) {
       try { writeSearchMetric(options.get("--metrics")!, input.results.length, result); }
-      catch { process.stderr.write("[amr] search metrics sink unavailable\n"); }
+      catch { process.stderr.write("[jao] search metrics sink unavailable\n"); }
     }
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     return;
@@ -267,7 +266,7 @@ async function main(): Promise<void> {
     const result = await filterMemory(input, ask);
     if (options.has("--metrics")) {
       try { writeMemoryMetric(options.get("--metrics")!, input.candidates.length, result); }
-      catch { process.stderr.write("[amr] memory metrics sink unavailable\n"); }
+      catch { process.stderr.write("[jao] memory metrics sink unavailable\n"); }
     }
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     return;
@@ -312,6 +311,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
-  process.stderr.write(`[amr] ${error instanceof Error ? error.message : "unexpected error"}\n`);
+  process.stderr.write(`[jao] ${error instanceof Error ? error.message : "unexpected error"}\n`);
   process.exitCode = 1;
 });
