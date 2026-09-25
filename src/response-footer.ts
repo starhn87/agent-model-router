@@ -4,14 +4,18 @@ const LIMIT = 4 * 1024 * 1024;
 type RecordValue = Record<string, any>;
 const record = (value: unknown): value is RecordValue => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 const safeModel = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(value);
+// A dated snapshot (claude-…-20251001, gpt-…-2025-08-07) is the requested model; a longer version number (…-5 vs …-5-5) is not.
+const DATED_SUFFIX = /^(?:\d{8}|\d{4}-\d{2}-\d{2})$/;
+export function sameModel(served: string, requested: string): boolean {
+  return served === requested || (served.startsWith(`${requested}-`) && DATED_SUFFIX.test(served.slice(requested.length + 1)));
+}
 function lastIndex(items: unknown[], predicate: (value: unknown) => boolean): number {
   for (let index = items.length - 1; index >= 0; index--) if (predicate(items[index])) return index;
   return -1;
 }
 
 export function responseFooter(model: unknown, effort?: string, requestedModel?: string): string {
-  if (!safeModel(model) || !safeModel(requestedModel) ||
-    model === requestedModel || model.startsWith(`${requestedModel}-`)) return "";
+  if (!safeModel(model) || !safeModel(requestedModel) || sameModel(model, requestedModel)) return "";
   return `\n\n— 모델: ${model} · 요청 effort: ${effort && /^[a-z]+$/.test(effort) ? effort : "기본값"} · 요청 모델: ${requestedModel} ≠`;
 }
 

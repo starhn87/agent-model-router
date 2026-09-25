@@ -1,4 +1,5 @@
 import { closeSync, fstatSync, openSync, readSync } from "node:fs";
+import { sameModel } from "./response-footer.js";
 
 const MAX_TAIL_BYTES = 512 * 1024;
 const MAX_ENTRIES = 20;
@@ -97,7 +98,7 @@ function displayTime(value: string): string {
 export function renderStatusPage(entries: StatusEntry[], hasMetricsFile: boolean): string {
   const latest = entries[0];
   const modelLabel = (entry: StatusEntry) => `${display(entry.servedModel, "응답 확인 대기")}${entry.servedModel && entry.requestedModel &&
-    entry.servedModel !== entry.requestedModel && !entry.servedModel.startsWith(`${entry.requestedModel}-`)
+    !sameModel(entry.servedModel, entry.requestedModel)
     ? ` <span title="요청 모델: ${display(entry.requestedModel)}">≠</span>` : ""}`;
   const rows = entries.map((entry) => `<tr><td>${displayTime(entry.at)}</td><td>${modelLabel(entry)}</td>` +
     `<td>${display(entry.recommendedEffort)}</td><td>${display(entry.requestedEffort)}</td><td>${display(entry.tier ?? entry.result)}</td></tr>`).join("");

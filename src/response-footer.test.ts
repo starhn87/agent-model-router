@@ -204,8 +204,11 @@ test("footer marks only a confirmed model mismatch and removes old mismatch trai
   const mismatch = responseFooter("served-model", "low", "requested-model");
   assert.equal(mismatch, "\n\n— 모델: served-model · 요청 effort: low · 요청 모델: requested-model ≠");
   assert.equal(stripResponseFooters(`Answer${mismatch}`), "Answer");
-  assert.equal(responseFooter("requested-model-20260901", "low", "requested-model"),
-    "");
+  assert.equal(responseFooter("requested-model-20260901", "low", "requested-model"), "");
+  assert.equal(responseFooter("requested-model-2026-09-01", "low", "requested-model"), "");
+  for (const longer of ["requested-model-5", "requested-model-5-20260901", "requested-model-latest"])
+    assert.equal(responseFooter(longer, "low", "requested-model"),
+      `\n\n— 모델: ${longer} · 요청 effort: low · 요청 모델: requested-model ≠`);
   assert.equal(responseFooter("requested-model", "low", "requested-model"), "");
   assert.equal(responseFooter("served-model", "low"), "");
 });

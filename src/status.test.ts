@@ -30,6 +30,14 @@ test("status pairs a routing decision with the completed model and escapes untru
   assert.doesNotMatch(html, /PRIVATE USER PROMPT|<script>/);
 });
 
+test("status marks a mismatch unless the served model is a dated snapshot of the request", () => {
+  const page = (servedModel: string) =>
+    renderStatusPage([{ at: "2026-09-25T08:00:01Z", requestedModel: "gpt-6-luna", servedModel }], true);
+  assert.doesNotMatch(page("gpt-6-luna-2026-09-01"), /≠/);
+  assert.doesNotMatch(page("gpt-6-luna-20260901"), /≠/);
+  assert.match(page("gpt-6-luna-2"), /≠/);
+});
+
 test("local status endpoint shows completed routing without contacting the model upstream", async (context) => {
   const directory = mkdtempSync(join(tmpdir(), "amr-status-"));
   context.after(() => rmSync(directory, { recursive: true, force: true }));

@@ -30,12 +30,12 @@ function harness({ answer = "fast", confidence = 0.95, effortScore = 2.8, env = 
     await hooks.get("session.start")($, {}, forward);
     await hooks.get("turn.start")($, { turnId, text }, forward);
   };
-  const step = async (turnId, agentId, text) => {
+  const step = async (turnId, agentId, text, served) => {
     let sent;
     const next = async function* (request) {
       sent = request;
       if (text) yield { kind: "text", index: 0, text };
-      yield { kind: "stop", usage: { model: request.model }, stopReason: "end_turn" };
+      yield { kind: "stop", usage: { model: served ?? request.model }, stopReason: "end_turn" };
     };
     const chunks = [];
     for await (const chunk of hooks.get("turn.step")($, {
@@ -143,13 +143,20 @@ test("short and skipped turns announce the session model and effort", async () =
   }
 });
 
-test("matching and dated API model IDs do not show a mismatch", async () => {
+test("matching and dated API model IDs do not show a mismatch; longer version numbers do", async () => {
   for (const model of ["claude-haiku-4-5", "claude-haiku-4-5-20260901"]) {
     const h = harness();
     await h.start("t", "Fix the spelling of this short example sentence.");
-    await h.step("t");
+    await h.step("t", undefined, undefined, model);
+    assert.ok(h.status().endsWith(`API served ${model}.`), h.status());
     assert.equal((await h.complete("t", { usage: { model } })).text, "Answer");
   }
+  const h = harness();
+  await h.start("t", "Fix the spelling of this short example sentence.");
+  await h.step("t", undefined, undefined, "claude-haiku-4-5-5");
+  assert.ok(h.status().endsWith("API served claude-haiku-4-5-5 ≠ claude-haiku-4-5."), h.status());
+  assert.equal((await h.complete("t", { usage: { model: "claude-haiku-4-5-5" } })).text,
+    "모델: claude-haiku-4-5-5 · 요청 effort: xhigh · 요청 모델: claude-haiku-4-5 ≠");
 });
 
 test("completion leaves subagents, interruptions, disabled routing and footer opt-out alone", async () => {

@@ -11,6 +11,12 @@ const MAX_PROMPT_CHARS = 1600;
 const MAX_CACHED_TURNS = 64;
 const SENSITIVE_PATTERN = /(?:-----BEGIN [A-Z ]*PRIVATE KEY-----|(?:api[_ -]?key|access[_ -]?token|bearer|password|secret)\s*[:=]\s*\S+|\.env\b)/i;
 
+// A dated snapshot (claude-…-20251001) is the requested model; a longer version number (…-5 vs …-5-5) is not.
+const DATED_SUFFIX = /^(?:\d{8}|\d{4}-\d{2}-\d{2})$/;
+function sameModel(served, requested) {
+  return served === requested || (served.startsWith(`${requested}-`) && DATED_SUFFIX.test(served.slice(requested.length + 1)));
+}
+
 export function keyFromEnvFile(contents) {
   for (const line of contents.split(/\r?\n/)) {
     const match = line.match(/^\s*(?:export\s+)?TYPESAFE_API_KEY\s*=\s*(.*?)\s*$/);
@@ -118,8 +124,7 @@ function statusOf(enabled, last) {
   const picked = last.model ? `${last.tier} → ${last.model} (${last.confidence})` : last.reason;
   const recommended = last.effort ? `; Jev recommended effort ${last.effort}` : "";
   const requested = last.requestedEffort ? `; requested effort ${last.requestedEffort}` : "";
-  const mismatch = last.model && last.servedModel && last.servedModel !== last.model &&
-    !last.servedModel.startsWith(`${last.model}-`) ? ` ≠ ${last.model}` : "";
+  const mismatch = last.model && last.servedModel && !sameModel(last.servedModel, last.model) ? ` ≠ ${last.model}` : "";
   const served = last.servedModel ? `; API served ${last.servedModel}${mismatch}` : "";
   return `Jev Agent Optimizer: ${picked}${recommended}${requested}${served}.`;
 }
@@ -184,7 +189,7 @@ export function register(on) {
     const model = e.usage?.model;
     if (typeof model !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(model) ||
       typeof route.model !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(route.model) ||
-      model === route.model || model.startsWith(`${route.model}-`)) return result;
+      sameModel(model, route.model)) return result;
     const effort = route.requestedEffort;
     const label = typeof effort === "number" && Number.isFinite(effort) ? String(effort)
       : typeof effort === "string" && /^[a-z]+$/.test(effort) ? effort : "기본값";
