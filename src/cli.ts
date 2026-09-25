@@ -13,6 +13,7 @@ import { readMetricsFile } from "./report.js";
 import { readPriceTable } from "./pricing.js";
 import { evaluateCases, readEvaluationCases } from "./evaluate.js";
 import { compareRuns, readComparisonInput } from "./compare.js";
+import { draftComparison, readMetricsText } from "./compare-draft.js";
 import { askSearchJev, searchGate, type SearchInput } from "./search-gate.js";
 import { readSearchMetrics, writeSearchMetric } from "./search-metrics.js";
 import { evaluateSearchSelections, readSearchEvaluation } from "./search-evaluate.js";
@@ -175,6 +176,7 @@ function help(): void {
     `  jao claude-shadow-hook --metrics FILE [--keychain-service NAME --keychain-account USER]\n` +
     `  jao report FILE [--prices PRICES.json]  (agent cost and savings estimate from your price table)\n\n` +
     `  jao compare FILE  (paired fixed and auto results; no model calls)\n` +
+    `  jao compare-draft FIXED.jsonl AUTO.jsonl [--prices FILE]  (prefill compare input from two metrics logs)\n` +
     `  jao search FILE|- [--metrics FILE]  (search-result decision; up to two paid Jev calls)\n` +
     `  jao search-report FILE\n` +
     `  jao search-evaluate FILE  (human-labelled needed-source recall)\n` +
@@ -212,6 +214,23 @@ async function main(): Promise<void> {
   if (command === "compare") {
     if (args.length !== 1) throw new Error("compare requires one results file");
     process.stdout.write(`${JSON.stringify(compareRuns(readComparisonInput(args[0]!)), null, 2)}\n`);
+    return;
+  }
+  if (command === "compare-draft") {
+    const [fixedFile, autoFile, ...rest] = args;
+    const options = new Map<string, string>();
+    for (let index = 0; index < rest.length; index += 2) {
+      const flag = rest[index], value = rest[index + 1];
+      if (!flag || !["--prices", "--fixed-policy", "--auto-policy"].includes(flag) || !value || options.has(flag)) {
+        throw new Error("usage: jao compare-draft FIXED.jsonl AUTO.jsonl [--prices FILE] [--fixed-policy NAME] [--auto-policy NAME]");
+      }
+      options.set(flag, value);
+    }
+    if (!fixedFile || !autoFile) throw new Error("compare-draft requires fixed and auto metrics files");
+    const prices = options.has("--prices") ? readPriceTable(options.get("--prices")!) : undefined;
+    const draft = draftComparison(readMetricsText(fixedFile), readMetricsText(autoFile),
+      options.get("--fixed-policy") ?? "fixed", options.get("--auto-policy") ?? "Jev Auto", prices);
+    process.stdout.write(`${JSON.stringify(draft, null, 2)}\n`);
     return;
   }
   if (command === "search") {

@@ -71,7 +71,13 @@ export function parseComparisonInput(value: unknown): ComparisonInput {
   for (const item of value.cases) {
     if (!record(item) || !exactKeys(item, ["id", "fixed", "auto"]) ||
       typeof item.id !== "string" || !/^[A-Za-z0-9_-]{1,80}$/.test(item.id) || ids.has(item.id) ||
-      !runResult(item.fixed) || !runResult(item.auto)) throw new Error("invalid comparison case");
+      !runResult(item.fixed) || !runResult(item.auto)) {
+      const unfilled = record(item) && [item.fixed, item.auto].some((run) => record(run) &&
+        (run.qualityScore === null || run.manualCorrections === null));
+      throw new Error(unfilled && typeof item.id === "string"
+        ? `comparison case ${item.id}: fill in qualityScore (0-5) and manualCorrections for both runs`
+        : "invalid comparison case");
+    }
     ids.add(item.id);
   }
   return value as ComparisonInput;

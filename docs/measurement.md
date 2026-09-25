@@ -30,4 +30,10 @@ cp fixtures/comparison-example.json .local/comparison.json
 node dist/cli.js compare .local/comparison.json
 ```
 
+같은 작업 목록을 두 정책으로 **같은 순서로** 실행해 로그를 따로 남겼다면(예: Codex `--mode force --force-model gpt-6-sol --metrics .local/fixed.jsonl`과 `--mode auto --metrics .local/auto.jsonl`), `compare-draft`로 입력 파일 초안을 만들 수 있습니다. 작업 시작 순서대로 짝을 짓고 `completed`, `elapsedMs`(관찰 구간, 실제 작업 시간의 하한), `--prices`가 있으면 추정 `billedUsd`를 채웁니다. `qualityScore`와 `manualCorrections`는 `null`로 남으며, 검토자가 채우기 전에는 `compare`가 해당 작업을 거절합니다. 작업 수가 다르면 초안을 만들지 않습니다. 추정 비용은 청구서 금액으로 바꿔 넣는 것이 좋습니다.
+
+```bash
+node dist/cli.js compare-draft .local/fixed.jsonl .local/auto.jsonl --prices .local/prices.json --fixed-policy gpt-6-sol > .local/comparison.json
+```
+
 `compare`는 모델을 실행하지 않습니다. 두 정책은 같은 작업·검증 기준·코드 버전에서 실행하고, 실행 순서를 바꿔가며 캐시와 시간대 영향을 줄이세요. 결과의 비용·시간 변화율은 입력한 두 실행의 관측치 차이이며, 완료율과 품질 저하 건수를 함께 봐야 합니다. 예제 숫자는 합성 데이터이므로 실제 절감률을 나타내지 않습니다.

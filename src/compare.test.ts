@@ -25,7 +25,7 @@ test("comparison rejects missing observations, duplicate IDs and prompt-bearing 
   assert.throws(() => parseComparisonInput({ ...example, cases: [{ ...example.cases[0], prompt: "private task" }] }), /invalid comparison case/);
   assert.throws(() => parseComparisonInput({ ...example, cases: [{ id: "missing", fixed: example.cases[0].fixed }] }), /invalid comparison case/);
   assert.throws(() => parseComparisonInput({ ...example, cases: [{ ...example.cases[0], auto: { ...example.cases[0].auto, billedUsd: -1 } }] }), /invalid comparison case/);
-  assert.throws(() => parseComparisonInput({ ...example, cases: [{ ...example.cases[0], auto: { ...example.cases[0].auto, qualityScore: null } }] }), /invalid comparison case/);
+  assert.throws(() => parseComparisonInput({ ...example, cases: [{ ...example.cases[0], auto: { ...example.cases[0].auto, qualityScore: null } }] }), /fill in qualityScore/);
 });
 
 test("unavailable billed cost stays unknown while time and quality remain comparable", () => {
