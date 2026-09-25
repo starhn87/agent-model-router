@@ -1,0 +1,6 @@
+{
+  "name": "agent-model-router",
+  "version": "0.1.0",
+  "description": "Optional per-turn Claude Code model routing with TypeSafe Jev",
+  "author": { "name": "Agent Model Router contributors" }
+}

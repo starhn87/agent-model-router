@@ -1,6 +1,6 @@
 # TypeSafe 키 설정
 
-`shadow`·`auto`·`evaluate`의 Jev 호출에는 TypeSafe API 키가 필요하다. 기본 방법은 Node.js 22 이상에서 지원하는 `.env` 파일이다. macOS, Linux, Windows에서 같은 `node --env-file=.env` 명령을 쓸 수 있다. 키체인을 선호한다면 아래의 macOS 전용 방법을 선택할 수 있다. `pass`·`force`와 키를 쓰지 않는 테스트에는 키가 필요 없다.
+`shadow`·`auto`·`evaluate` 및 Claude 함수 훅의 Jev 호출에는 TypeSafe API 키가 필요하다. 기본 방법은 `.env` 파일이다. Codex CLI는 Node.js 22 이상의 `node --env-file=.env`로, Claude 함수 훅은 파일을 직접 읽는 방식으로 사용한다. macOS, Linux, Windows에서 같은 키 파일 형식을 쓸 수 있다. 키체인을 선호한다면 아래의 macOS 전용 방법을 선택할 수 있다. `pass`·`force`와 키를 쓰지 않는 테스트에는 키가 필요 없다.
 
 ## 모든 OS: `.env` 파일
 
@@ -25,6 +25,8 @@ node --env-file=.env dist/cli.js codex --mode shadow --metrics .local/codex.json
 ```
 
 `.env` 파일 대신 셸이나 CI의 비밀 관리 기능으로 `TYPESAFE_API_KEY`를 프로세스 환경에 넣어도 된다. 이 경우 `--env-file`을 생략한다. 라우터는 기존 호환 변수 `JEV_API_KEY`도 읽는다. Codex CLI 자식 프로세스에는 두 변수를 전달하지 않는다.
+
+Claude 함수 훅 플러그인은 먼저 Claude 프로세스의 `TYPESAFE_API_KEY`를 확인하고, 없으면 `AMR_ENV_FILE`이 가리키는 `.env`를 읽는다. `AMR_ENV_FILE`도 없을 때는 저장소에서 직접 실행한 플러그인 기준으로 상위 디렉터리의 `.env`를 읽는다. 데스크톱 Code 탭처럼 플러그인을 사용자 skills 디렉터리에 설치한 경우에는 `AMR_ENV_FILE`에 절대 경로를 설정한다. 이 경로만 Claude 설정에 저장하면 키 값을 설정 파일에 적거나 Claude 인증 환경 변수로 넘길 필요가 없다. `.env`에는 `TYPESAFE_API_KEY=...` 한 줄을 사용한다.
 
 ## 선택 사항: macOS 로그인 키체인
 
@@ -78,4 +80,4 @@ security find-generic-password -a "$(id -un)" -s agent-model-router-typesafe \
 
 기존 비밀 관리 도구를 사용하는 경우에도 해당 도구의 프로세스 환경 주입 기능을 사용할 수 있다. `echo`, `printenv`, 셸 추적(`set -x`) 등으로 키를 출력하지 않는다. Jev가 켜진 `shadow`도 실제 TypeSafe 호출을 수행하므로 유료 실행 범위 확인에 포함한다.
 
-Claude 관찰 훅에서도 같은 Keychain 옵션을 사용한다. 훅 프로세스가 키체인에서 값을 직접 읽으므로 Claude 메인 프로세스에 `TYPESAFE_API_KEY`를 설정하지 않아도 된다. 짧은 후속 입력처럼 Jev 분류를 건너뛰는 경우에는 키체인도 읽지 않는다.
+Claude의 `UserPromptSubmit` 관찰 훅에서는 같은 Keychain 옵션을 사용할 수 있다. 관찰 훅 프로세스가 키체인에서 값을 직접 읽으므로 Claude 메인 프로세스에 `TYPESAFE_API_KEY`를 설정하지 않아도 된다. 함수 훅 자동 전환 플러그인은 macOS Keychain 명령에 의존하지 않고 `.env`를 읽는다. 짧은 후속 입력처럼 Jev 분류를 건너뛰는 경우에는 키 파일도 읽지 않는다.

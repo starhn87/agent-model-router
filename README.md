@@ -1,6 +1,6 @@
 # Agent Model Router
 
-Codex와 Claude Code에서 턴별 모델 선택을 시험하는 로컬 프로젝트입니다. TypeSafe Jev가 요청을 `fast`·`balanced`·`strong`으로 분류하고, 명시적으로 `auto`를 켠 Codex 요청에서만 응답 모델을 바꿉니다. Claude Code는 추천을 기록하는 관찰 모드만 지원합니다. 공개 합성 사례로 연결을 검증했으며, 실제 업무 품질이나 상시 사용을 검증한 제품은 아닙니다.
+Codex와 Claude Code에서 턴별 모델 선택을 시험하는 로컬 프로젝트입니다. TypeSafe Jev가 요청을 `fast`·`balanced`·`strong`으로 분류하고, `auto`를 켠 Codex 요청 또는 Claude Code 함수 훅에서 응답 모델을 바꿉니다. 공개 합성 사례로 연결을 검증했으며, 실제 업무 품질이나 장기 사용의 비용 절감을 검증한 제품은 아닙니다.
 
 ## 현재 상태
 
@@ -8,10 +8,9 @@ Codex와 Claude Code에서 턴별 모델 선택을 시험하는 로컬 프로젝
 | --- | --- | --- |
 | Codex CLI | 기존 ChatGPT 로그인으로 로컬 프록시를 거쳐 `pass`·`force`·`shadow`·`auto` 실행 | 실제 Jev로 같은 대화의 `fast → balanced` 전환과 도구 사용 완료. 낮은 신뢰도에서는 모델 유지, 이미지 턴에서는 Jev 생략 확인. 저장된 판정 재생으로 `strong` 승급과 짧은 후속 지시의 모델 유지 확인 |
 | Codex 데스크톱 | 동일 프록시와 사용자 수준 설정 예시 제공 | 수정된 문맥 추정기로 실제 앱 `shadow`의 Jev `fast` 추천·기존 모델 유지 확인. 이어 제한적 `auto`에서 `gpt-6-luna` 전환과 응답 완료 확인. 원래 설정 복원 완료 |
-| Claude Code CLI·데스크톱 Code 탭 | 공식 `UserPromptSubmit` 훅으로 Jev 추천을 비동기 관찰 | CLI와 데스크톱 Code 탭에서 Jev 추천 확인. 데스크톱 합성 턴의 앱 응답까지 완료했으며 임시 훅 제거 |
-| Claude 구독 기반 턴별 자동 전환 | 미구현 | 현재 공식 훅이 모델 변경을 실행하지 못함 |
+| Claude Code CLI·데스크톱 Code 탭 | 초기 접근 기능인 함수 훅 플러그인으로 주 턴의 모델 요청을 전환. 기존 `UserPromptSubmit` 관찰 훅도 선택 가능 | `sonnet` CLI 세션에서 모의 Jev 및 실제 Jev 판정 뒤 `haiku` 응답 메타데이터 확인. 사용자 범위 플러그인 설치 후 일반 CLI와 데스크톱 Code 탭의 공개 합성 세션에서도 `haiku` 응답 확인 |
 
-Claude 구독 세션을 가로채는 프록시는 만들지 않았습니다. Claude의 별도 API 게이트웨이는 구독 외 과금과 자격 증명이 필요하므로 이 프로젝트에서 자동 활성화하지 않습니다.
+Claude 구독 세션을 가로채는 프록시는 만들지 않았습니다. Claude Code 내부의 [초기 접근 함수 훅](https://github.com/anthropics/claude-code/blob/main/mods/README.md)을 사용하므로 설치된 Claude Code 버전에 따라 동작이 바뀔 수 있습니다. Claude의 별도 API 게이트웨이는 구독 외 과금과 자격 증명이 필요하므로 이 프로젝트에서 자동 활성화하지 않습니다.
 
 TypeSafe `jev-latest` 연결 확인 1건, 기존 합성 10건과 AI 임시 판정 30건의 예비평가를 마쳤습니다. `jev-1.13.0`의 결과는 각각 10/10, 29/30 일치했고, 30건 중 `strong`을 `balanced`로 낮춘 사례가 1건 있었습니다. 사람이 독립 판정한 품질 검증을 대체하지 않습니다.
 
@@ -86,6 +85,36 @@ supports_websockets = false
 
 서버 종료는 진행 중인 HTTP/SSE 연결도 취소합니다. 업스트림 응답이 도중에 끊기면 SSE 연결을 오류로 닫으며, 아직 응답을 보내지 않은 모델 목록 요청에는 원문 오류를 포함하지 않는 502를 반환합니다.
 
+## Claude Code 자동 전환 (실험 기능)
+
+`claude-mod/`는 Claude Code의 함수 훅으로 사용자 턴이 시작될 때 Jev를 한 번 호출하고, 해당 턴의 주 에이전트 모델 요청을 `fast=claude-haiku-4-5`, `balanced=claude-sonnet-5`, `strong=claude-opus-5`로 보냅니다. 신뢰도가 0.8 미만이거나 분류에 실패하면 세션 모델을 유지합니다. 12자 미만 후속 입력과 명백한 비밀 문자열이 있는 입력은 Jev에 보내지 않습니다. 서브에이전트는 자체 모델을 유지합니다. 각 모델 ID는 `AMR_CLAUDE_FAST_MODEL`, `AMR_CLAUDE_BALANCED_MODEL`, `AMR_CLAUDE_STRONG_MODEL` 환경 변수로 바꿀 수 있습니다.
+
+프로젝트 루트에 [키 설정 안내](docs/local-secrets.md)에 따라 `.env`를 준비한 뒤, CLI 한 세션만 시험하려면 다음을 실행합니다. 플러그인이 `.env`를 직접 읽으므로 TypeSafe 키를 Claude의 인증 환경 변수에 넣지 않습니다. 이 호출은 사용자 프롬프트 최대 1,600자를 TypeSafe로 보내며 유료 Jev 요청이 생길 수 있습니다.
+
+```bash
+CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 AMR_CLAUDE_AUTO=1 claude --plugin-dir "$(pwd -P)/claude-mod"
+```
+
+일상 CLI와 데스크톱 Code 탭에서 사용하려면 플러그인을 Claude의 사용자 범위 skills 디렉터리에 연결하고, `~/.claude/settings.json`의 기존 설정에 아래 `env` 항목을 병합합니다. `REPO_ABS_PATH`를 저장소의 절대 경로로 바꾸세요. 이 파일에는 키 값이 아닌 `.env` 경로만 기록합니다. macOS·Linux의 연결 예시이며 Windows에서는 플러그인 디렉터리를 복사해 설치할 수 있습니다.
+
+```bash
+ln -s "$(pwd -P)/claude-mod" "$HOME/.claude/skills/agent-model-router"
+```
+
+```json
+{
+  "env": {
+    "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS": "1",
+    "AMR_CLAUDE_AUTO": "1",
+    "AMR_ENV_FILE": "REPO_ABS_PATH/.env"
+  }
+}
+```
+
+새 Claude Code 세션을 열어 `/amr-route`로 최근 Jev 판정과 API가 실제로 응답한 모델을 확인할 수 있습니다. Claude 앱의 모델 배지는 **세션 모델**을 표시하므로 턴별 전환 후에도 그대로일 수 있습니다. CLI에서는 `claude -p --verbose --output-format stream-json ...` 결과의 `modelUsage`와 `assistant.message.model`로도 확인할 수 있습니다. Claude Code 2.1.282에서 CLI와 데스크톱 Code 탭의 공개 합성 턴으로 실제 전환을 확인했습니다. 이 함수 훅 API는 초기 접근 기능이므로 Claude 업데이트 후 `claude plugin validate --strict claude-mod`와 합성 턴을 다시 시험하세요.
+
+자동 전환을 끄려면 `AMR_CLAUDE_AUTO`를 `0`으로 바꾸고 새 세션을 시작합니다. 플러그인까지 제거하려면 사용자 skills 디렉터리의 `agent-model-router` 연결을 삭제하고 추가한 세 환경 변수를 설정에서 지웁니다. 이미 `UserPromptSubmit` 관찰 훅을 설치했다면 자동 전환과 함께 Jev를 두 번 호출하지 않도록 그 훅을 제거하세요.
+
 ## Claude Code 관찰 모드
 
 Claude의 공식 `UserPromptSubmit` 훅은 프롬프트를 볼 수 있지만 모델 선택 명령은 제공하지 않습니다. 따라서 이 훅은 **추천 기록 전용**입니다. 아래 예시를 자신의 Claude Code 설정에 병합하기 전에 `REPO_ABS_PATH`를 저장소의 절대 경로로 바꾸세요. macOS·Linux에서는 프로젝트 디렉터리에서 `pwd -P`로 확인할 수 있습니다. 경로에 공백이 있어도 동작하도록 경로를 따옴표로 감쌌습니다. 프로젝트는 훅을 자동 설치하지 않습니다.
@@ -108,7 +137,7 @@ Claude의 공식 `UserPromptSubmit` 훅은 프롬프트를 볼 수 있지만 모
 }
 ```
 
-현재 모델은 바뀌지 않습니다. 훅은 stdout에 아무것도 쓰지 않으므로 대화에 지시문을 주입하지 않습니다. `async` 훅이므로 추천 계산이 대화를 기다리게 하지 않습니다. `--env-file`은 훅 자식 프로세스에서만 키를 읽으며 Claude 메인 프로세스의 환경은 바꾸지 않습니다. Claude CLI와 데스크톱 Code 탭의 Jev 추천·앱 응답은 로컬 시험에서 확인했고 시험용 훅은 제거했습니다.
+이 관찰 훅에서는 모델이 바뀌지 않습니다. 훅은 stdout에 아무것도 쓰지 않으므로 대화에 지시문을 주입하지 않습니다. `async` 훅이므로 추천 계산이 대화를 기다리게 하지 않습니다. `--env-file`은 훅 자식 프로세스에서만 키를 읽으며 Claude 메인 프로세스의 환경은 바꾸지 않습니다. Claude CLI와 데스크톱 Code 탭의 Jev 추천·앱 응답은 로컬 시험에서 확인했고 시험용 훅은 제거했습니다.
 
 ## 평가와 비용
 
@@ -129,8 +158,9 @@ node dist/cli.js report .local/codex.jsonl
 - Jev가 활성화되면 사용자 턴의 텍스트 최대 1,600자를 TypeSafe로 전송합니다. 비밀 문자열 탐지는 완전한 DLP가 아닙니다. 민감한 업무에는 `pass` 또는 `force`를 사용하세요.
 - 프록시는 ChatGPT용 고정 업스트림으로만 전달하고 계정 토큰이나 요청 원문을 기록하지 않습니다. 로그에는 모델·등급·신뢰도·지연·토큰 수만 남습니다. TypeSafe 키는 프록시 부모 프로세스에만 두고 Codex CLI 자식 환경에서는 제거합니다.
 - 자동 전환은 새 사용자 턴에서만 결정하고 도구 실행 후 이어지는 요청에는 같은 모델을 고정합니다.
+- Claude 함수 훅도 Jev를 사용자 턴당 한 번만 호출하고 그 턴의 주 에이전트 요청에 같은 모델을 적용합니다. 짧은 입력·명백한 비밀 문자열·낮은 신뢰도·오류에서는 세션 모델을 유지합니다. 첨부 이미지와 전체 대화 문맥의 크기는 아직 Claude 함수 훅에서 검사하지 않으므로, 민감한 작업이나 긴 문맥에서는 `AMR_CLAUDE_AUTO=0`으로 끄세요.
 - Codex 요청의 대화 ID로 모델 상태를 분리합니다. 대화 ID가 없으면 이전 요청의 모델 상태를 물려받지 않고 기준 모델에서 시작합니다.
-- 라우터는 Codex 전역 모델 설정이나 Claude 전역 훅을 자동으로 설치하지 않습니다. 데스크톱 연결을 수동으로 시험했다면 설정을 복원하고 앱을 재시작하세요. 기존 `ANTHROPIC_API_KEY` 환경 변수가 Claude 구독 인증보다 우선되는 경우에는 [인증 우선순위 안내](https://support.claude.com/en/articles/12304248-manage-api-key-environment-variables-in-claude-code)를 확인하세요.
+- 저장소는 Codex 전역 모델 설정이나 Claude 플러그인을 자동 설치하지 않습니다. 이 개발 머신에는 사용자 범위 Claude 플러그인과 함수 훅 환경 설정을 시험용으로 적용했습니다. 기존 `ANTHROPIC_API_KEY` 환경 변수가 Claude 구독 인증보다 우선되는 경우에는 [인증 우선순위 안내](https://support.claude.com/en/articles/12304248-manage-api-key-environment-variables-in-claude-code)를 확인하세요.
 
 구체적인 단계별 통과 기준과 남은 검증은 [검증 계획](docs/validation-plan.md)에 있습니다.
 
@@ -141,3 +171,5 @@ node dist/cli.js report .local/codex.jsonl
 - [Claude Code 훅](https://code.claude.com/docs/en/hooks) · [게이트웨이 연결](https://code.claude.com/docs/en/llm-gateway-connect)
 
 Codex 프로토콜 연결 방식은 [jev-router](https://github.com/gargpratyush/jev-router)의 구현을 참고해 독립적으로 작성했습니다. Claude 구독 자격 증명 중계 방식은 채택하지 않았습니다.
+
+Claude 함수 훅의 연결 방식은 [jev-model-router](https://github.com/satviksinha/jev-model-router)와 [Claude Code Mods 소스](https://github.com/anthropics/claude-code/tree/main/mods)를 참고해 독립적으로 구현했습니다.
