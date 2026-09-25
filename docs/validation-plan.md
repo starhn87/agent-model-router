@@ -37,6 +37,8 @@ Jev 요청 한 번에서 모델 등급과 effort 점수를 함께 받도록 수�
 
 Auto effort 메뉴 검토: 설치된 Codex `0.155.0-alpha.16.4`의 app-server는 `ReasoningEffort`를 문자열로 받고, 합성 카탈로그의 `auto` 선택지·기본값을 `model/list`에 반환했다. 그러나 데스크톱 앱의 실제 메뉴 코드는 별도의 고정 목록(`none`·`minimal`·`low`·`medium`·`high`·`xhigh`·`max`·`ultra`·`persistent`)으로 선택지를 필터링해 `auto`를 제외한다. 따라서 app-server 응답만으로 네이티브 메뉴 추가를 검증할 수 없다. 시험용 `auto` effort 카탈로그와 요청 변환 구현은 되돌렸으며, 전역 effort 설정은 변경하지 않았다. Jev Auto의 모델·effort 자동 선택과 상태 화면은 기존대로 유지한다. 이 검토에는 유료 모델 호출을 사용하지 않았다.
 
+기존 작업의 연결 확인: 설정 변경 전에 생성한 데스크톱 작업은 Jev Auto를 선택한 뒤에도 `thread/read`의 `modelProvider`가 `openai`였고, 같은 작업 디렉터리의 `config/read` 결과는 새 작업용 `agent_router`였다. 라우터 지표와 `/status.json`의 마지막 시각도 새 메시지 뒤 갱신되지 않았다. 모델 목록의 표시 이름은 기존 작업의 공급자 연결을 바꾸지 않는다. 기본 `openai` 공급자의 주소를 설정으로 덮어쓰는 모의 시험은 Codex가 내장 공급자 ID 재정의를 금지해 요청 전 단계에서 거절됐다. 전역 설정은 변경하지 않았고, 상태 화면에 화면 갱신 시각·마지막 라우터 기록·새 작업 필요 조건을 추가했다. 이 연결 진단에는 유료 모델 호출을 사용하지 않았다.
+
 ## 2. Jev 추천 품질
 
 `fixtures/routing-cases.json`의 합성 사례를 시작점으로, 실제 사용에 가까운 한국어 턴 최소 30개를 사람이 먼저 독립적으로 등급 판정한다. `amr evaluate`의 결과와 비교한다.

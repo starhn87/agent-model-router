@@ -96,7 +96,7 @@ export function renderStatusPage(entries: StatusEntry[], hasMetricsFile: boolean
   const latest = entries[0];
   const rows = entries.map((entry) => `<tr><td>${displayTime(entry.at)}</td><td>${display(entry.servedModel, "응답 확인 대기")}</td>` +
     `<td>${display(entry.requestedEffort)}</td><td>${display(entry.tier ?? entry.result)}</td></tr>`).join("");
-  const empty = hasMetricsFile ? "아직 관찰한 요청이 없습니다. Codex에서 새 턴을 보내면 여기에 표시됩니다."
+  const empty = hasMetricsFile ? "아직 관찰한 요청이 없습니다. 라우터 설정을 적용한 새 Codex 작업에서 메시지를 보내세요."
     : "상태 기록을 보려면 라우터를 --metrics FILE 옵션으로 시작하세요.";
   return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">` +
     `<meta http-equiv="refresh" content="3"><title>Jev Auto 상태</title><style>` +
@@ -105,8 +105,11 @@ export function renderStatusPage(entries: StatusEntry[], hasMetricsFile: boolean
     `.value{font-size:1.5rem;font-weight:700}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}` +
     `small,.muted{opacity:.72}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:10px;border-bottom:1px solid #8885}` +
     `@media(max-width:600px){.grid{grid-template-columns:1fr}table{font-size:.8rem}}` +
-    `</style></head><body><h1>Jev Auto</h1><p class="muted">Codex 선택 영역의 모델·effort는 세션 기본값입니다. ` +
-    `여기에는 전체 Codex 작업에서 라우터가 보낸 effort와 완료 응답에서 확인한 모델을 표시합니다. 3초마다 갱신합니다.</p>` +
+    `</style></head><body><h1>Jev Auto</h1><p class="muted">이 화면은 로컬 라우터를 거친 자동 라우팅 요청만 표시합니다. ` +
+    `Codex에 Jev Auto가 표시되는 것만으로 이 작업의 연결을 확인할 수는 없습니다. 3초마다 갱신합니다.</p>` +
+    `<p class="muted">화면 갱신: ${displayTime(new Date().toISOString())} · 마지막 라우터 기록: ${latest ? displayTime(latest.at) : "없음"}</p>` +
+    `<p>새 메시지를 보냈는데 마지막 기록 시각이 바뀌지 않나요? 설정 변경 전에 만든 작업은 기존 공급자 연결을 유지할 수 있습니다. ` +
+    `라우터 설정을 적용한 뒤 <strong>새 Codex 작업</strong>에서 Jev Auto를 선택하세요. 기존 작업의 모델만 바꿔도 연결은 바뀌지 않습니다.</p>` +
     (latest ? `<div class="card"><div class="grid"><div><small>실제 응답 모델</small><div class="value">${display(latest.servedModel, "응답 확인 대기")}</div></div>` +
       `<div><small>요청 effort</small><div class="value">${display(latest.requestedEffort)}</div></div></div>` +
       `<p>요청 모델: <strong>${display(latest.requestedModel)}</strong> · Jev 등급: <strong>${display(latest.tier)}</strong>` +
