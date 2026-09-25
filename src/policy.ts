@@ -22,7 +22,7 @@ export function defaultSettings(mode: RouterSettings["mode"] = "shadow"): Router
   };
 }
 
-const SENSITIVE_PATTERN = /(?:-----BEGIN [A-Z ]*PRIVATE KEY-----|(?:api[_ -]?key|access[_ -]?token|bearer|password|secret)\s*[:=]\s*\S+|\.env\b)/i;
+export const SENSITIVE_PATTERN = /(?:-----BEGIN [A-Z ]*PRIVATE KEY-----|(?:api[_ -]?key|access[_ -]?token|bearer|password|secret)\s*[:=]\s*\S+|\.env\b)/i;
 const ACKNOWLEDGEMENTS = new Set(["응", "네", "예", "좋아", "좋아요", "오케이", "알겠어", "ok", "okay", "yes"]);
 const CONTINUATIONS = [
   /^(?:(?:그대로|이어서|계속) )?(?:계속|진행)(?:해(?:\s?줘|주세요|요)?)?$/u,
@@ -54,7 +54,7 @@ export function fallbackModel(currentModel: string, settings: RouterSettings, al
     .find((model) => allowedModels.has(model)) ?? allowedModels.values().next().value!;
 }
 
-function isSimpleTurn(prompt: string): boolean {
+export function isSimpleTurn(prompt: string): boolean {
   if (/^(?:안녕(?:하세요|하십니까)?|반가워(?:요)?|hello|hi|hey)[.!~\s]*$/iu.test(prompt)) return true;
   if (prompt.length > 240 || /[\r\n]/u.test(prompt)) return false;
   // Require supplied text plus an exact correction instruction, not a keyword.

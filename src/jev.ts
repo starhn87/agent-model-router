@@ -8,6 +8,20 @@ export type JevOptions = {
   fetchImpl?: typeof fetch;
 };
 
+// claude-mod/hooks/register.js sends the same criteria; claude-mod/tests/policy-sync.test.js checks it.
+export const TIER_CRITERIA = {
+  fast: "Simple formatting, direct facts, small unambiguous edits, or routine replies with low risk.",
+  balanced: "Typical coding, writing, analysis, and multi-step tasks requiring sound judgment.",
+  strong: "Hard debugging, architecture, high-stakes reasoning, complex cross-file changes, or ambiguous trade-offs.",
+};
+export const EFFORT_CRITERIA = [
+  "Immediate answer or mechanical edit; little reasoning.",
+  "A few simple steps or a small choice.",
+  "Several steps, ordinary coding, or a meaningful judgment.",
+  "Complex debugging, planning, or interacting constraints.",
+  "Open-ended or high-stakes work requiring the deepest reasoning.",
+];
+
 const TIERS: ReadonlySet<string> = new Set(["fast", "balanced", "strong"]);
 
 export async function askJev(query: RouteQuery, options: JevOptions = {}): Promise<RouteChoice> {
@@ -25,22 +39,12 @@ export async function askJev(query: RouteQuery, options: JevOptions = {}): Promi
       tier: {
         type: "choice",
         instructions: "Choose the least expensive model tier that can reliably complete this user turn. Assess the current requested work. Conversation length and the previous model are not evidence of task difficulty. Use strong only when the current task clearly requires it. If context is insufficient to judge, choose balanced.",
-        criteria: {
-          fast: "Simple formatting, direct facts, small unambiguous edits, or routine replies with low risk.",
-          balanced: "Typical coding, writing, analysis, and multi-step tasks requiring sound judgment.",
-          strong: "Hard debugging, architecture, high-stakes reasoning, complex cross-file changes, or ambiguous trade-offs.",
-        },
+        criteria: TIER_CRITERIA,
       },
       effort: {
         type: "score",
         instructions: "How much reasoning does this user turn require? Judge the work independently of the model tier.",
-        criteria: [
-          "Immediate answer or mechanical edit; little reasoning.",
-          "A few simple steps or a small choice.",
-          "Several steps, ordinary coding, or a meaningful judgment.",
-          "Complex debugging, planning, or interacting constraints.",
-          "Open-ended or high-stakes work requiring the deepest reasoning.",
-        ],
+        criteria: EFFORT_CRITERIA,
       },
     },
   };
