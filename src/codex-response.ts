@@ -41,17 +41,19 @@ export class CodexResponseObserver {
   private buffer = Buffer.alloc(0);
   private disabled = false;
   private completed: ObservedResponse | null = null;
-  private readonly format: "sse" | "json" | "unsupported";
+  private format: "sse" | "json" | "unknown" | "unsupported";
 
   constructor(contentType: string | undefined, contentEncoding: string | undefined) {
     this.format = contentEncoding && contentEncoding.toLowerCase() !== "identity" ? "unsupported"
       : contentType?.toLowerCase().includes("text/event-stream") ? "sse"
-      : contentType?.toLowerCase().includes("application/json") ? "json" : "unsupported";
+      : contentType?.toLowerCase().includes("application/json") ? "json"
+      : contentType ? "unsupported" : "unknown";
   }
 
   push(chunk: Buffer): void {
     if (this.disabled || this.format === "unsupported") return;
     this.buffer = Buffer.concat([this.buffer, chunk]);
+    this.detectFormat();
     if (this.format === "sse") {
       for (let boundary = frameBoundary(this.buffer); boundary; boundary = frameBoundary(this.buffer)) {
         const frame = this.buffer.subarray(0, boundary.index);
@@ -65,6 +67,7 @@ export class CodexResponseObserver {
 
   finish(): ObservedResponse | null {
     if (this.disabled || this.format === "unsupported") return null;
+    this.detectFormat();
     if (this.format === "json") {
       try {
         const body: unknown = JSON.parse(this.buffer.toString("utf8"));
@@ -73,6 +76,18 @@ export class CodexResponseObserver {
     }
     if (this.buffer.length) this.readFrame(this.buffer);
     return this.completed;
+  }
+
+  completedEvent(): ObservedResponse | null {
+    return this.completed;
+  }
+
+  private detectFormat(): void {
+    if (this.format !== "unknown") return;
+    const start = this.buffer.subarray(0, 64).toString("utf8").trimStart();
+    if (start.startsWith("event:") || start.startsWith("data:") || start.startsWith(":")) this.format = "sse";
+    else if (start.startsWith("{")) this.format = "json";
+    else if (this.buffer.length >= 64) this.disable();
   }
 
   private disable(): void {

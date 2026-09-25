@@ -242,12 +242,19 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           Array.isArray(contentType) ? contentType[0] : contentType,
           Array.isArray(contentEncoding) ? contentEncoding[0] : contentEncoding,
         );
-        upstreamResponse.on("data", (chunk: Buffer) => observer.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
-        upstreamResponse.on("end", () => {
-          if (!upstreamResponse.complete) return;
-          const observed = observer.finish();
-          if (observed) router.recordObservation(requestId!, requestedModel!, observed);
+        let recorded = false;
+        const record = (observed: ObservedResponse | null): void => {
+          if (!observed || recorded) return;
+          recorded = true;
+          router.recordObservation(requestId!, requestedModel!, observed);
+        };
+        upstreamResponse.on("data", (chunk: Buffer) => {
+          observer.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+          record(observer.completedEvent());
         });
+        upstreamResponse.on("end", () => record(observer.finish()));
+        // Codex may close the SSE connection after a completion event without waiting for EOF.
+        upstreamResponse.on("close", () => record(observer.finish()));
       }
       response.writeHead(upstreamResponse.statusCode ?? 502, responseHeaders);
       upstreamResponse.pipe(response);

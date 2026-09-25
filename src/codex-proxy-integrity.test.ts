@@ -202,6 +202,27 @@ test("auto routing records the model actually served without changing SSE bytes"
   assert.equal(JSON.stringify(observations).includes(prompt), false);
 });
 
+test("completed SSE is observed even when the upstream omits Content-Type and stays open", { timeout: 3000 }, async (context) => {
+  let resolveObservation!: (event: ResponseObservationEvent) => void;
+  const observed = new Promise<ResponseObservationEvent>((resolve) => { resolveObservation = resolve; });
+  const proxy = await harness(context, (_request, response) => {
+    response.writeHead(200);
+    response.write('event: response.completed\ndata: {"type":"response.completed","response":{"model":"gpt-6-luna"}}\n\n');
+  }, {
+    settings: defaultSettings("auto"), classify: async () => ({ tier: "fast", confidence: 0.95 }),
+    onObservation: resolveObservation,
+  });
+  const response = await fetch(`${proxy.url}/responses`, { method: "POST", body: JSON.stringify(requestBody), signal: proxy.signal });
+  const reader = response.body!.getReader();
+  assert.equal((await reader.read()).done, false);
+  const result = await Promise.race([
+    observed,
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error("observation waited for EOF")), 500)),
+  ]);
+  assert.equal(result.servedModel, "gpt-6-luna");
+  await reader.cancel();
+});
+
 test("Jev failure after a fast turn records the fallback model actually requested", async () => {
   const events: DecisionEvent[] = [];
   let calls = 0;

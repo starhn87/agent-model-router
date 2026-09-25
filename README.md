@@ -64,7 +64,7 @@ node --env-file=.env dist/cli.js codex --mode auto --downgrade-confidence 0.9 --
 node dist/cli.js report .local/codex.jsonl
 ```
 
-지표에는 라우터가 **요청한 모델**과 완료된 Codex 응답이 보고한 **실제 모델 ID**를 별도 행으로 남깁니다. 같은 `requestId`로 두 행을 연결할 수 있습니다. `observedResponses`는 확인된 API 응답 수, `differentModelIds`는 요청·응답 모델 ID가 정확히 다르게 나온 수, `observedCacheReadRate`는 관찰된 입력 토큰 중 캐시에서 읽은 비율입니다. 날짜가 붙은 모델 ID처럼 이름만 다를 수도 있으므로 `differentModelIds`만으로 잘못된 등급이라고 단정하지 마세요. 도구 연속 요청에는 새 Jev 판정 없이 응답 관찰 행만 생길 수 있습니다. 관찰은 완료된 비압축 Responses JSON 또는 SSE에서만 기록하며, 4MiB를 넘는 이벤트·본문은 건너뜁니다. 응답 원문과 프롬프트는 기록하지 않습니다.
+지표에는 라우터가 **요청한 모델**과 완료된 Codex 응답이 보고한 **실제 모델 ID**를 별도 행으로 남깁니다. 같은 `requestId`로 두 행을 연결할 수 있습니다. `observedResponses`는 확인된 API 응답 수, `differentModelIds`는 요청·응답 모델 ID가 정확히 다르게 나온 수, `observedCacheReadRate`는 관찰된 입력 토큰 중 캐시에서 읽은 비율입니다. 날짜가 붙은 모델 ID처럼 이름만 다를 수도 있으므로 `differentModelIds`만으로 잘못된 등급이라고 단정하지 마세요. 도구 연속 요청에는 새 Jev 판정 없이 응답 관찰 행만 생길 수 있습니다. 관찰은 완료된 비압축 Responses JSON 또는 SSE에서만 기록하며, `Content-Type`이 없는 SSE나 완료 직후 닫히는 연결도 처리합니다. 4MiB를 넘는 이벤트·본문은 건너뜁니다. 응답 원문과 프롬프트는 기록하지 않습니다.
 
 ## Codex 데스크톱 연결 준비
 

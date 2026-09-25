@@ -24,6 +24,14 @@ test("completed JSON responses are observed, while incomplete or compressed bodi
   assert.equal(compressed.finish(), null);
 });
 
+test("SSE can be identified without a Content-Type header before the connection closes", () => {
+  const observer = new CodexResponseObserver(undefined, undefined);
+  observer.push(Buffer.from("eve"));
+  assert.equal(observer.completedEvent(), null);
+  observer.push(Buffer.from('nt: response.completed\ndata: {"type":"response.completed","response":{"model":"gpt-6-astra"}}\n\n'));
+  assert.equal(observer.completedEvent()?.servedModel, "gpt-6-astra");
+});
+
 test("malformed and oversized completion metadata cannot interrupt streaming", () => {
   const malformed = new CodexResponseObserver("text/event-stream", undefined);
   malformed.push(Buffer.from('event: response.completed\ndata: {bad json}\n\n'));
