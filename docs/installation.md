@@ -48,7 +48,9 @@ node --env-file=.env dist/cli.js codex --mode auto --baseline-model gpt-6-astra 
 
 ## Claude Code 마켓플레이스
 
-원격 저장소에 이 버전을 게시한 후:
+이 저장소는 Claude Code용 마켓플레이스를 포함합니다. `claude plugin marketplace add`로 등록하면 CLI의 `/plugin`과 Claude 앱 **Code 탭의 로컬 세션**에서 `+` → **플러그인** → **플러그인 추가**에 목록이 나타납니다. 앱의 일반 **사용자 지정 → 플러그인 → 탐색**은 claude.ai 계정에서 동기화하는 별도 목록입니다. 그 화면에 저장소 등록만으로 나타난다고 안내하지 않습니다([Claude 데스크톱 Code 탭 문서](https://code.claude.com/docs/en/desktop#install-plugins)).
+
+새로운 설치를 마켓플레이스 방식으로 진행한다면:
 
 ```bash
 claude plugin marketplace add starhn87/agent-model-router
