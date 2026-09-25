@@ -47,6 +47,8 @@ test("adopted Codex install actually disables routing and conflicts never get ov
 test("Claude setup and removal merge only managed env keys and adopt existing auto settings", () => {
   const original = JSON.stringify({ env: { OTHER: "preserved", AMR_CLAUDE_AUTO: "1" }, permissions: { allow: ["Read"] } });
   const updated = configureClaude(original, "/repo");
+  assert.equal(JSON.parse(updated).env.AMR_CLAUDE_AUTO, undefined);
+  assert.equal(JSON.parse(updated).env.JAO_CLAUDE_AUTO, "1");
   const later = JSON.parse(updated); later.theme = "dark";
   const removed = JSON.parse(unconfigureClaude(JSON.stringify(later), original, "/repo"));
   assert.equal(removed.env.OTHER, "preserved");
@@ -61,18 +63,45 @@ test("Claude install is idempotent, stores private backups and removes cleanly",
   const h = fixture(t);
   h.put(".claude/settings.json", '{"env":{"OTHER":"preserved"}}');
   await install("claude", h.context);
-  const firstState = h.get(".agent-model-router/install.json");
+  const firstState = h.get(".jev-agent-optimizer/install.json");
   await install("claude", h.context);
-  assert.equal(h.get(".agent-model-router/install.json"), firstState);
+  assert.equal(h.get(".jev-agent-optimizer/install.json"), firstState);
   assert.ok(lstatSync(join(h.context.home, ".claude/skills/jev-agent-optimizer")).isSymbolicLink());
   assert.ok(lstatSync(join(h.context.home, ".claude/skills/agent-context-gates")).isSymbolicLink());
-  assert.equal(lstatSync(join(h.context.home, ".agent-model-router/install.json")).mode & 0o777, 0o600);
+  assert.equal(lstatSync(join(h.context.home, ".jev-agent-optimizer/install.json")).mode & 0o777, 0o600);
   const settings = JSON.parse(h.get(".claude/settings.json")); settings.theme = "dark";
   h.put(".claude/settings.json", JSON.stringify(settings));
   uninstall("claude", h.context);
   assert.deepEqual(JSON.parse(h.get(".claude/settings.json")), { env: { OTHER: "preserved" }, theme: "dark" });
   assert.equal(existsSync(join(h.context.home, ".claude/skills/jev-agent-optimizer")), false);
   assert.equal(existsSync(join(h.context.home, ".claude/skills/agent-context-gates")), false);
+});
+
+test("legacy install state and Claude env move to the new names", async (t) => {
+  const h = fixture(t);
+  h.put(".agent-model-router/install.json", JSON.stringify({ version: 1, repo: h.context.repo,
+    claude: { config: '{"env":{"OTHER":"preserved"}}', linkExisted: false } }));
+  h.put(".claude/settings.json", JSON.stringify({ env: { OTHER: "preserved", CLAUDE_CODE_ENABLE_FUNCTION_HOOKS: "1",
+    AMR_CLAUDE_AUTO: "1", AMR_ENV_FILE: join(h.context.repo, ".env"), AMR_RESPONSE_FOOTER: "1" } }));
+  mkdirSync(join(h.context.home, ".claude/skills"), { recursive: true });
+  symlinkSync(join(h.context.repo, "claude-mod"), join(h.context.home, ".claude/skills/jev-agent-optimizer"), "dir");
+  await install("claude", h.context);
+  assert.equal(existsSync(join(h.context.home, ".agent-model-router/install.json")), false);
+  assert.equal(existsSync(join(h.context.home, ".jev-agent-optimizer/install.json")), true);
+  const env = JSON.parse(h.get(".claude/settings.json")).env;
+  assert.equal(env.JAO_CLAUDE_AUTO, "1");
+  assert.equal(env.JAO_ENV_FILE, join(h.context.repo, ".env"));
+  assert.equal(env.AMR_CLAUDE_AUTO, undefined);
+  uninstall("claude", h.context);
+  assert.deepEqual(JSON.parse(h.get(".claude/settings.json")).env, { OTHER: "preserved" });
+});
+
+test("conflicting old and new install records stop migration before changes", async (t) => {
+  const h = fixture(t);
+  h.put(".agent-model-router/install.json", JSON.stringify({ version: 1, repo: h.context.repo }));
+  h.put(".jev-agent-optimizer/install.json", JSON.stringify({ version: 1, repo: "/different" }));
+  await assert.rejects(install("claude", h.context), /서로 달라/);
+  assert.equal(existsSync(join(h.context.home, ".claude/settings.json")), false);
 });
 
 test("both install validates before mutations and handles an existing unrelated plugin safely", async (t) => {
@@ -109,6 +138,7 @@ test("user-owned legacy Claude link moves to the new ID and stays on uninstall",
     AMR_CLAUDE_AUTO: "1", AMR_ENV_FILE: join(h.context.repo, ".env"), AMR_RESPONSE_FOOTER: "1" } }));
   await install("claude", h.context);
   const current = join(h.context.home, ".claude/skills/jev-agent-optimizer");
+  assert.equal(existsSync(join(h.context.home, ".agent-model-router/install.json")), false);
   assert.equal(existsSync(legacy), false);
   assert.ok(lstatSync(current).isSymbolicLink());
   uninstall("claude", h.context);
@@ -153,9 +183,9 @@ test("existing Codex setup gains the new skill link on reinstall", async (t) => 
   await install("codex", h.context);
   const link = join(h.context.home, ".agents/skills/agent-context-gates");
   rmSync(link);
-  const state = JSON.parse(h.get(".agent-model-router/install.json"));
+  const state = JSON.parse(h.get(".jev-agent-optimizer/install.json"));
   delete state.codex.skillLinkExisted;
-  h.put(".agent-model-router/install.json", JSON.stringify(state));
+  h.put(".jev-agent-optimizer/install.json", JSON.stringify(state));
   await install("codex", h.context);
   assert.ok(lstatSync(link).isSymbolicLink());
   uninstall("codex", h.context);

@@ -39,7 +39,7 @@ export function choiceFromJev(body) {
 async function apiKey($) {
   const direct = await $.env.get("TYPESAFE_API_KEY");
   if (direct) return direct;
-  const file = await $.env.get("AMR_ENV_FILE") || `${$.plugin.root}/../.env`;
+  const file = await $.env.get("JAO_ENV_FILE") || `${$.plugin.root}/../.env`;
   try {
     return keyFromEnvFile(await $.fs.read(file));
   } catch {
@@ -55,7 +55,7 @@ async function routeTurn($, text) {
   const key = await apiKey($);
   if (!key) return { reason: "TypeSafe key unavailable" };
 
-  const endpoint = await $.env.get("AMR_TYPESAFE_ENDPOINT") || ENDPOINT;
+  const endpoint = await $.env.get("JAO_TYPESAFE_ENDPOINT") || ENDPOINT;
   const request = {
     model: "jev-latest",
     state: { user_turn: prompt.slice(0, MAX_PROMPT_CHARS) },
@@ -102,10 +102,10 @@ async function routeTurn($, text) {
         reason: "Jev tier confidence below 0.8" };
     }
     const model = choice.tier === "fast"
-      ? await $.env.get("AMR_CLAUDE_FAST_MODEL") || MODELS.fast
+      ? await $.env.get("JAO_CLAUDE_FAST_MODEL") || MODELS.fast
       : choice.tier === "balanced"
-        ? await $.env.get("AMR_CLAUDE_BALANCED_MODEL") || MODELS.balanced
-        : await $.env.get("AMR_CLAUDE_STRONG_MODEL") || MODELS.strong;
+        ? await $.env.get("JAO_CLAUDE_BALANCED_MODEL") || MODELS.balanced
+        : await $.env.get("JAO_CLAUDE_STRONG_MODEL") || MODELS.strong;
     return { ...choice, model, reason: "Jev choice" };
   } catch {
     return { reason: "Jev request failed" };
@@ -113,7 +113,7 @@ async function routeTurn($, text) {
 }
 
 function statusOf(enabled, last) {
-  if (!enabled) return "Jev Agent Optimizer: off (set AMR_CLAUDE_AUTO=1 and restart Claude Code).";
+  if (!enabled) return "Jev Agent Optimizer: off (set JAO_CLAUDE_AUTO=1 and restart Claude Code).";
   if (!last) return "Jev Agent Optimizer: on; no user turn classified yet.";
   const picked = last.model ? `${last.tier} → ${last.model} (${last.confidence})` : last.reason;
   const recommended = last.effort ? `; Jev recommended effort ${last.effort}` : "";
@@ -131,8 +131,8 @@ export function register(on) {
   let last = null;
 
   on("session.start", async ($, e, next) => {
-    enabled = (await $.env.get("AMR_CLAUDE_AUTO")) === "1";
-    footerEnabled = (await $.env.get("AMR_RESPONSE_FOOTER")) !== "0";
+    enabled = (await $.env.get("JAO_CLAUDE_AUTO")) === "1";
+    footerEnabled = (await $.env.get("JAO_RESPONSE_FOOTER")) !== "0";
     await $.command.register({ name: "jao-route", description: "Show the last Jev route and API model" });
     return next(e);
   });

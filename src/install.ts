@@ -75,7 +75,11 @@ export function unconfigureCodex(current: string, previous: string | null): stri
   return `${restored}${headWithoutModel(parsed.head)}${parsed.rest.join("").trimEnd()}${!adopted && original.provider ? `\n\n${original.provider}` : ""}\n`;
 }
 function claudeEnv(repo: string): Record<string, string> {
-  return { CLAUDE_CODE_ENABLE_FUNCTION_HOOKS: "1", AMR_CLAUDE_AUTO: "1", AMR_ENV_FILE: join(repo, ".env"), AMR_RESPONSE_FOOTER: "1" };
+  return { CLAUDE_CODE_ENABLE_FUNCTION_HOOKS: "1", JAO_CLAUDE_AUTO: "1", JAO_ENV_FILE: join(repo, ".env"), JAO_RESPONSE_FOOTER: "1" };
+}
+function removeLegacyClaudeEnv(settings: Record<string, any>, repo: string): void {
+  const managed = { AMR_CLAUDE_AUTO: "1", AMR_ENV_FILE: join(repo, ".env"), AMR_RESPONSE_FOOTER: "1" };
+  for (const [key, value] of Object.entries(managed)) if (settings.env?.[key] === value) delete settings.env[key];
 }
 export function configureClaude(text: string | null, repo: string): string {
   const settings = object(text);
@@ -84,6 +88,7 @@ export function configureClaude(text: string | null, repo: string): string {
     (name.startsWith("jev-agent-optimizer@") || name.startsWith("agent-model-router@")) && enabled)) {
     throw new Error("마켓플레이스 라우터가 이미 설치되어 있습니다. 중복 설치하지 말고 해당 플러그인을 사용하세요.");
   }
+  removeLegacyClaudeEnv(settings, repo);
   return json({ ...settings, env: { ...settings.env, ...claudeEnv(repo) } });
 }
 export function unconfigureClaude(current: string, previous: string | null, repo: string): string {
@@ -94,8 +99,9 @@ export function unconfigureClaude(current: string, previous: string | null, repo
     if (before.env && Object.hasOwn(before.env, key)) settings.env[key] = before.env[key];
     else delete settings.env[key];
   }
-  // Adopt legacy AMR installs, but disabling must actually turn routing off.
+  // Adopt legacy installs, but disabling must actually turn routing off.
   if (before.env?.AMR_CLAUDE_AUTO === "1") settings.env.AMR_CLAUDE_AUTO = "0";
+  if (before.env?.JAO_CLAUDE_AUTO === "1") settings.env.JAO_CLAUDE_AUTO = "0";
   if (!Object.keys(settings.env).length) delete settings.env;
   return json(settings);
 }
@@ -109,7 +115,7 @@ export function servicePlist(context: InstallContext): string {
 type SavedClient = { config: string | null; service?: string | null; linkExisted?: boolean; skillLinkExisted?: boolean };
 type InstallState = { version: 1; repo: string; codex?: SavedClient; claude?: SavedClient };
 function paths(context: InstallContext) {
-  return { state: join(context.home, ".agent-model-router/install.json"), codex: join(context.home, ".codex/config.toml"),
+  return { state: join(context.home, ".jev-agent-optimizer/install.json"), legacyState: join(context.home, ".agent-model-router/install.json"), codex: join(context.home, ".codex/config.toml"),
     claude: join(context.home, ".claude/settings.json"), link: join(context.home, ".claude/skills/jev-agent-optimizer"),
     legacyLink: join(context.home, ".claude/skills/agent-model-router"),
     codexSkill: join(context.home, ".agents/skills/agent-context-gates"),
@@ -118,7 +124,11 @@ function paths(context: InstallContext) {
     target: join(context.repo, "claude-mod"), service: join(context.home, `Library/LaunchAgents/${LABEL}.plist`) };
 }
 function stateOf(context: InstallContext): InstallState {
-  const text = read(paths(context).state);
+  const p = paths(context);
+  const current = read(p.state);
+  const legacy = read(p.legacyState);
+  if (current && legacy && current !== legacy) throw new Error("새·기존 설치 기록이 서로 달라 자동 이전을 중단했습니다.");
+  const text = current ?? legacy;
   if (!text) return { version: 1, repo: context.repo };
   const state = JSON.parse(text) as InstallState;
   if (state.version !== 1 || state.repo !== context.repo) throw new Error("다른 경로에서 설치된 라우터가 있습니다. 기존 경로에서 먼저 해제하세요.");
@@ -133,7 +143,7 @@ function stop(context: InstallContext, service: string): void {
 }
 function start(context: InstallContext, service: string): void { context.run("launchctl", ["bootstrap", domain(), service]); }
 function backup(context: InstallContext, files: string[]): void {
-  const dir = join(context.home, ".agent-model-router/backups", `${Date.now()}-${process.pid}`);
+  const dir = join(context.home, ".jev-agent-optimizer/backups", `${Date.now()}-${process.pid}`);
   for (const [index, file] of files.entries()) {
     const content = read(file);
     if (content !== null) write(join(dir, `${index}-${file.split("/").at(-1)}`), content);
@@ -194,7 +204,7 @@ export async function install(client: Client, context: InstallContext): Promise<
       }
     }
   }
-  backup(context, [p.codex, p.claude, p.service, p.state]);
+  backup(context, [p.codex, p.claude, p.service, p.state, p.legacyState]);
   const hadLink = present(p.link);
   const hadLegacyLink = Boolean(state.claude && sameLink(p.legacyLink, p.target));
   const migrateOwnedLink = hadLegacyLink && state.claude?.linkExisted === true;
@@ -237,6 +247,7 @@ export async function install(client: Client, context: InstallContext): Promise<
       if (hadLegacyLink && !migrateOwnedLink) rmSync(p.legacyLink);
     }
     write(p.state, json(state));
+    if (present(p.legacyState)) rmSync(p.legacyState);
   } catch (error) {
     if (codex && serviceStopped) {
       stop(context, p.service); restore(p.service, beforeService); restore(p.codex, beforeCodex);
@@ -254,7 +265,7 @@ export async function install(client: Client, context: InstallContext): Promise<
     restore(p.state, oldState);
     throw error;
   }
-  return `${client} 설치 완료. 설정 백업: ${join(context.home, ".agent-model-router/backups")}\n` +
+  return `${client} 설치 완료. 설정 백업: ${join(context.home, ".jev-agent-optimizer/backups")}\n` +
     (codex ? "Codex: 로그인 시 서버가 자동 시작됩니다. 앱을 재시작하고 새 작업에서 Jev Auto를 선택하세요. 검색·기억 스킬도 연결됐습니다.\n" : "") +
     (claude ? "Claude: 새 CLI/Code 탭 세션부터 자동 적용됩니다. /jao-route로 확인하세요. 검색·기억 스킬도 연결됐습니다.\n" : "") +
     "응답 시작에 선택 모델과 요청 effort가 표시되고, 실제 모델이 다를 때만 끝에 알립니다. npm run doctor로 설치 상태를 확인하세요.\n";
@@ -274,7 +285,7 @@ export function uninstall(client: Client, context: InstallContext): string {
   if (codex && codex.skillLinkExisted === false && !sameLink(p.codexSkill, p.gateTarget)) throw new Error("Codex 검색·기억 스킬 연결이 변경됐습니다.");
   if (claude && claude.skillLinkExisted === false && !sameLink(p.claudeSkill, p.gateTarget)) throw new Error("Claude 검색·기억 스킬 연결이 변경됐습니다.");
   if (!codex && !claude) throw new Error("이 설치 도구의 설치 기록이 없습니다. 먼저 npm run setup으로 기존 설치를 등록하세요.");
-  backup(context, [p.codex, p.claude, p.service, p.state]);
+  backup(context, [p.codex, p.claude, p.service, p.state, p.legacyState]);
   if (codex) {
     // Restore the provider before stopping the service, including adopted legacy installs.
     write(p.codex, nextCodex!);
@@ -289,6 +300,7 @@ export function uninstall(client: Client, context: InstallContext): string {
     if (claude.skillLinkExisted === false) rmSync(p.claudeSkill);
   }
   write(p.state, json(state));
+  if (present(p.legacyState)) rmSync(p.legacyState);
   return "자동 라우팅을 해제했습니다. Codex 앱을 재시작하고 새 작업을 만드세요. Claude도 새 세션부터 반영됩니다. 키 파일은 보존했습니다.\n";
 }
 
@@ -304,7 +316,7 @@ export async function doctor(context: InstallContext): Promise<string> {
     const linked = sameLink(p.link, p.target) || sameLink(p.legacyLink, p.target);
     const marketplace = Object.entries(settings.enabledPlugins ?? {}).some(([name, enabled]) =>
       (name.startsWith("jev-agent-optimizer@") || name.startsWith("agent-model-router@")) && enabled);
-    const enabled = settings.env?.AMR_CLAUDE_AUTO === "1" && settings.env?.CLAUDE_CODE_ENABLE_FUNCTION_HOOKS === "1";
+    const enabled = (settings.env?.JAO_CLAUDE_AUTO === "1" || settings.env?.AMR_CLAUDE_AUTO === "1") && settings.env?.CLAUDE_CODE_ENABLE_FUNCTION_HOOKS === "1";
     lines.push(`Claude: 플러그인 ${linked ? "로컬 연결됨" : marketplace ? "마켓플레이스에서 활성화됨" : "연결 없음"} · 자동 라우팅 ${enabled ? "설정 켜짐" : "설정 꺼짐"}`);
     lines.push(`  설정: ${p.claude}\n  확인: 새 Claude Code 세션에서 /jao-route (일반 채팅에는 적용 안 됨)`);
   } catch { lines.push(`Claude: 설정 읽기 실패 (${p.claude})`); }
@@ -322,7 +334,7 @@ export async function doctor(context: InstallContext): Promise<string> {
     lines.push(`  서버: ${health.status === "ok" ? "응답 중" : "확인 필요"} · 응답 끝 표시: ${health.responseFooter ? "지원/활성" : "구버전 또는 비활성"}`);
   } catch { lines.push("  서버: 응답 없음 — npm run setup -- codex로 설치/재시작하세요."); }
   lines.push("  기존 Codex 작업은 옛 공급자를 유지할 수 있습니다. 앱 재시작 후 새 작업에서 Jev Auto를 선택하세요.");
-  lines.push(`설치 도구 기록: ${existsSync(p.state) ? p.state : "없음 (기존 수동 설치일 수 있음)"}`);
+  lines.push(`설치 도구 기록: ${existsSync(p.state) ? p.state : existsSync(p.legacyState) ? `${p.legacyState} (이전 설치 기록)` : "없음 (기존 수동 설치일 수 있음)"}`);
   return `${lines.join("\n")}\n`;
 }
 

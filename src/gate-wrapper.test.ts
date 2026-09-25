@@ -11,7 +11,7 @@ test("installed skill wrapper invokes the gate with a private local metrics path
   const repo = resolve(".");
   symlinkSync(join(repo, "dist"), join(temp, "dist"), "dir");
   writeFileSync(join(temp, ".env"), "# no key for fail-open verification\n");
-  const environment: NodeJS.ProcessEnv = { ...process.env, AMR_ENV_FILE: join(temp, ".env") };
+  const environment: NodeJS.ProcessEnv = { ...process.env, JAO_ENV_FILE: join(temp, ".env") };
   delete environment.TYPESAFE_API_KEY;
   delete environment.JEV_API_KEY;
   const result = spawnSync(process.execPath, [join(repo, "claude-mod/skills/agent-context-gates/scripts/gate.mjs"),

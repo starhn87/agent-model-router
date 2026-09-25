@@ -26,7 +26,7 @@ node --env-file=.env dist/cli.js codex --mode shadow --metrics .local/codex.json
 
 `.env` 파일 대신 셸이나 CI의 비밀 관리 기능으로 `TYPESAFE_API_KEY`를 프로세스 환경에 넣어도 된다. 이 경우 `--env-file`을 생략한다. 라우터는 기존 호환 변수 `JEV_API_KEY`도 읽는다. Codex CLI 자식 프로세스에는 두 변수를 전달하지 않는다.
 
-Claude 함수 훅 플러그인은 먼저 Claude 프로세스의 `TYPESAFE_API_KEY`를 확인하고, 없으면 `AMR_ENV_FILE`이 가리키는 `.env`를 읽는다. `AMR_ENV_FILE`도 없을 때는 저장소에서 직접 실행한 플러그인 기준으로 상위 디렉터리의 `.env`를 읽는다. 데스크톱 Code 탭처럼 플러그인을 사용자 skills 디렉터리에 설치한 경우에는 `AMR_ENV_FILE`에 절대 경로를 설정한다. 이 경로만 Claude 설정에 저장하면 키 값을 설정 파일에 적거나 Claude 인증 환경 변수로 넘길 필요가 없다. `.env`에는 `TYPESAFE_API_KEY=...` 한 줄을 사용한다.
+Claude 함수 훅 플러그인은 먼저 Claude 프로세스의 `TYPESAFE_API_KEY`를 확인하고, 없으면 `JAO_ENV_FILE`이 가리키는 `.env`를 읽는다. `JAO_ENV_FILE`도 없을 때는 저장소에서 직접 실행한 플러그인 기준으로 상위 디렉터리의 `.env`를 읽는다. 데스크톱 Code 탭처럼 플러그인을 사용자 skills 디렉터리에 설치한 경우에는 `JAO_ENV_FILE`에 절대 경로를 설정한다. 이 경로만 Claude 설정에 저장하면 키 값을 설정 파일에 적거나 Claude 인증 환경 변수로 넘길 필요가 없다. `.env`에는 `TYPESAFE_API_KEY=...` 한 줄을 사용한다.
 
 ## 선택 사항: macOS 로그인 키체인
 

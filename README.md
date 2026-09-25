@@ -1,7 +1,7 @@
 # Jev Agent Optimizer
 
 Codex와 Claude Code에서 모델·effort를 자동 선택하고, 검색·기억 후보 선별을 돕습니다.
-명령 이름은 `jao`입니다. 기존 설치는 `npm run setup`으로 새 플러그인 ID에 맞춰 갱신합니다.
+명령 이름은 `jao`입니다. 기존 설치는 `npm run setup`으로 플러그인 ID, `JAO_*` 환경변수, 설치 기록 경로를 갱신합니다.
 
 ## 설치
 

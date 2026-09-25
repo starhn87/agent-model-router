@@ -11,7 +11,7 @@ function harness({ answer = "fast", confidence = 0.95, effortScore = 2.8, env = 
   });
   const $ = {
     plugin: { root: "/router/claude-mod" },
-    env: { get: async (name) => ({ AMR_CLAUDE_AUTO: "1", ...env })[name] },
+    env: { get: async (name) => ({ JAO_CLAUDE_AUTO: "1", ...env })[name] },
     fs: { read: async () => "TYPESAFE_API_KEY=test-key\n" },
     clock: { sleep: () => new Promise(() => {}) },
     command: { register: async (spec) => registered.push(spec) },
@@ -103,7 +103,7 @@ test("maps a strong decision to Opus and can be disabled for a new session", asy
   await strong.start("turn-1", "Investigate this difficult multi-file architecture problem.");
   assert.equal((await strong.step("turn-1")).sent.model, "claude-opus-5");
 
-  const disabled = harness({ env: { AMR_CLAUDE_AUTO: "0" } });
+  const disabled = harness({ env: { JAO_CLAUDE_AUTO: "0" } });
   await disabled.start("turn-2", "Investigate this difficult multi-file architecture problem.");
   assert.equal(disabled.requests.length, 0);
   assert.equal((await disabled.step("turn-2")).sent.model, "claude-sonnet-5");
@@ -146,7 +146,7 @@ test("completion leaves subagents, interruptions, disabled routing and footer op
     await h.step("t");
     assert.equal((await h.complete("t", extra)).text, "Answer");
   }
-  for (const env of [{ AMR_CLAUDE_AUTO: "0" }, { AMR_RESPONSE_FOOTER: "0" }]) {
+  for (const env of [{ JAO_CLAUDE_AUTO: "0" }, { JAO_RESPONSE_FOOTER: "0" }]) {
     const h = harness({ env });
     await h.start("t", "Fix the spelling of this short example sentence.");
     await h.step("t");

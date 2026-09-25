@@ -12,8 +12,8 @@ if (!(["search", "memory"].includes(mode) && input && process.argv.length === 4)
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const sourceRoot = resolve(scriptDir, "../../../..");
-const envFile = process.env.AMR_ENV_FILE || join(sourceRoot, ".env");
-const root = process.env.AMR_ENV_FILE ? dirname(resolve(envFile)) : sourceRoot;
+const envFile = process.env.JAO_ENV_FILE || join(sourceRoot, ".env");
+const root = process.env.JAO_ENV_FILE ? dirname(resolve(envFile)) : sourceRoot;
 const cli = join(root, "dist/cli.js");
 if (!existsSync(cli) || !existsSync(envFile)) {
   process.stderr.write("[jao] Router build or local key file unavailable; continue without Jev gate.\n");
