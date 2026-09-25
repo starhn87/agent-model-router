@@ -3,6 +3,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { summarizeMetrics } from "./report.js";
 
 export type Client = "codex" | "claude" | "both";
 export type InstallContext = {
@@ -304,6 +305,16 @@ export function uninstall(client: Client, context: InstallContext): string {
   return "자동 라우팅을 해제했습니다. Codex 앱을 재시작하고 새 작업을 만드세요. Claude도 새 세션부터 반영됩니다. 키 파일은 보존했습니다.\n";
 }
 
+// Recent lines only, so an old outage does not keep warning after Jev recovered.
+function jevHealth(path: string): string | null {
+  let text: string;
+  try { text = readFileSync(path, "utf8"); } catch { return null; }
+  const summary = summarizeMetrics(text.split("\n").slice(-500).join("\n"));
+  if (!summary.jevAttempts) return null;
+  const rate = `${summary.jevErrors}/${summary.jevAttempts} 실패`;
+  return summary.warnings.length ? `${rate} — 실패한 턴은 balanced 모델로 돌아가 절감 효과가 줄어듭니다. 키·네트워크를 확인하세요.` : `${rate}`;
+}
+
 export async function doctor(context: InstallContext): Promise<string> {
   const p = paths(context);
   const lines = [`Jev Agent Optimizer · ${context.repo}`];
@@ -334,6 +345,10 @@ export async function doctor(context: InstallContext): Promise<string> {
     lines.push(`  서버: ${health.status === "ok" ? "응답 중" : "확인 필요"} · 응답 끝 표시: ${health.responseFooter ? "지원/활성" : "구버전 또는 비활성"}`);
   } catch { lines.push("  서버: 응답 없음 — npm run setup -- codex로 설치/재시작하세요."); }
   lines.push("  기존 Codex 작업은 옛 공급자를 유지할 수 있습니다. 앱 재시작 후 새 작업에서 Jev Auto를 선택하세요.");
+  for (const [label, file] of [["Codex", ".local/codex-persistent.jsonl"], ["Claude", ".local/claude.jsonl"]] as const) {
+    const health = jevHealth(join(context.repo, file));
+    if (health) lines.push(`${label} 최근 Jev 호출: ${health}`);
+  }
   lines.push(`설치 도구 기록: ${existsSync(p.state) ? p.state : existsSync(p.legacyState) ? `${p.legacyState} (이전 설치 기록)` : "없음 (기존 수동 설치일 수 있음)"}`);
   return `${lines.join("\n")}\n`;
 }

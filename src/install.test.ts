@@ -164,6 +164,10 @@ test("both install runs service before redirecting Codex, and disable preserves 
   assert.ok(lstatSync(join(h.context.home, ".agents/skills/agent-context-gates")).isSymbolicLink());
   assert.match(servicePlist(h.context), /repo space &amp; test/);
   assert.match(await doctor(h.context), /연결됨/);
+  mkdirSync(join(h.context.repo, ".local"), { recursive: true });
+  writeFileSync(join(h.context.repo, ".local/claude.jsonl"), [...Array(8).fill('{"client":"claude","result":"error","reason":"x"}'),
+    ...Array(4).fill('{"client":"claude","result":"routed","latencyMs":5,"reason":"x"}')].join("\n"));
+  assert.match(await doctor(h.context), /Claude 최근 Jev 호출: 8\/12 실패 — /);
   h.put(".codex/config.toml", `${h.get(".codex/config.toml")}\n[unrelated]\nvalue = 42\n`);
   uninstall("both", h.context);
   assert.match(h.get(".codex/config.toml"), /\[unrelated\]\nvalue = 42/);
