@@ -9,12 +9,33 @@ const CONFIDENCE_FLOOR = 0.8;
 const TIMEOUT_MS = 1500;
 const MAX_PROMPT_CHARS = 1600;
 const MAX_CACHED_TURNS = 64;
-const SENSITIVE_PATTERN = /(?:-----BEGIN [A-Z ]*PRIVATE KEY-----|(?:api[_ -]?key|access[_ -]?token|bearer|password|secret)\s*[:=]\s*\S+|\.env\b)/i;
+const METRICS_MAX_BYTES = 3 * 1024 * 1024;
+// A model switch forfeits the session's warm prompt cache, so the local fast path
+// only applies while the re-sent context is small.
+const FAST_PATH_MAX_CONTEXT_TOKENS = 20_000;
+export const SENSITIVE_PATTERN = /(?:-----BEGIN [A-Z ]*PRIVATE KEY-----|(?:api[_ -]?key|access[_ -]?token|bearer|password|secret)\s*[:=]\s*\S+|\.env\b)/i;
 
 // A dated snapshot (claude-…-20251001) is the requested model; a longer version number (…-5 vs …-5-5) is not.
 const DATED_SUFFIX = /^(?:\d{8}|\d{4}-\d{2}-\d{2})$/;
 function sameModel(served, requested) {
   return served === requested || (served.startsWith(`${requested}-`) && DATED_SUFFIX.test(served.slice(requested.length + 1)));
+}
+
+// Mirrors isSimpleTurn in src/policy.ts; claude-mod/tests/policy-sync.test.js keeps them in step.
+export function isSimpleTurn(prompt) {
+  if (/^(?:안녕(?:하세요|하십니까)?|반가워(?:요)?|hello|hi|hey)[.!~\s]*$/iu.test(prompt)) return true;
+  if (prompt.length > 240 || /[\r\n]/u.test(prompt)) return false;
+  const korean = prompt.match(/^(.+?)(?:의)?\s+(?:맞춤법|문법|오탈자)(?:을|를)?\s*(?:고쳐\s*줘|수정해\s*줘|교정해\s*줘)[.!?\s]*$/u);
+  const english = prompt.match(/^(?:fix|correct) (?:the )?(?:spelling|grammar)(?: of| in)?\s*:\s*(.+)$/iu);
+  const supplied = korean?.[1] ?? english?.[1];
+  if (!supplied) return false;
+  const quoted = supplied.match(/^(?:"([^"\r\n]+)"|'([^'\r\n]+)'|“([^”\r\n]+)”|‘([^’\r\n]+)’)$/u);
+  if (quoted) {
+    const prose = quoted.slice(1).find((part) => part !== undefined);
+    return /\p{L}/u.test(prose) && /^[\p{L}\p{N}\s,.!?…'’“-]+$/u.test(prose);
+  }
+  if (/^(?:this|that|it|the above|previous|above)(?:\s|$)/iu.test(supplied)) return false;
+  return /^[a-z][a-z ',.!?’-]*$/iu.test(supplied) && supplied.trim().split(/\s+/u).length >= 3;
 }
 
 export function keyFromEnvFile(contents) {
@@ -42,10 +63,14 @@ export function choiceFromJev(body) {
   return { tier: answer.choice, confidence: answer.confidence, ...(effort ? { effort } : {}) };
 }
 
+async function envFile($) {
+  return await $.env.get("JAO_ENV_FILE") || `${$.plugin.root}/../.env`;
+}
+
 async function apiKey($) {
   const direct = await $.env.get("TYPESAFE_API_KEY");
   if (direct) return direct;
-  const file = await $.env.get("JAO_ENV_FILE") || `${$.plugin.root}/../.env`;
+  const file = await envFile($);
   try {
     return keyFromEnvFile(await $.fs.read(file));
   } catch {
@@ -53,16 +78,13 @@ async function apiKey($) {
   }
 }
 
-async function routeTurn($, text) {
-  const prompt = text.trim();
-  if (prompt.length < 12) return { reason: "short or empty prompt" };
-  if (SENSITIVE_PATTERN.test(prompt)) return { reason: "sensitive prompt" };
+async function modelFor($, tier) {
+  const name = { fast: "JAO_CLAUDE_FAST_MODEL", balanced: "JAO_CLAUDE_BALANCED_MODEL", strong: "JAO_CLAUDE_STRONG_MODEL" }[tier];
+  return await $.env.get(name) || MODELS[tier];
+}
 
-  const key = await apiKey($);
-  if (!key) return { reason: "TypeSafe key unavailable" };
-
-  const endpoint = await $.env.get("JAO_TYPESAFE_ENDPOINT") || ENDPOINT;
-  const request = {
+export function jevRequest(prompt) {
+  return {
     model: "jev-latest",
     state: { user_turn: prompt.slice(0, MAX_PROMPT_CHARS) },
     questions: {
@@ -88,6 +110,23 @@ async function routeTurn($, text) {
       },
     },
   };
+}
+
+async function routeTurn($, text, contextTokens) {
+  const prompt = text.trim();
+  if (SENSITIVE_PATTERN.test(prompt)) return { reason: "sensitive prompt" };
+  if (isSimpleTurn(prompt)) {
+    if (contextTokens > FAST_PATH_MAX_CONTEXT_TOKENS) return { reason: "simple turn; kept warm cache" };
+    return { tier: "fast", confidence: 1, effort: "low", model: await modelFor($, "fast"), reason: "simple turn" };
+  }
+  if (prompt.length < 12) return { reason: "short or empty prompt" };
+
+  const key = await apiKey($);
+  if (!key) return { reason: "TypeSafe key unavailable" };
+
+  const endpoint = await $.env.get("JAO_TYPESAFE_ENDPOINT") || ENDPOINT;
+  const request = jevRequest(prompt);
+  const started = await now($);
 
   try {
     const timeout = Symbol("timeout");
@@ -99,23 +138,56 @@ async function routeTurn($, text) {
       }),
       $.clock.sleep(TIMEOUT_MS).then(() => timeout),
     ]);
-    if (response === timeout) return { reason: "Jev timeout" };
-    if (!response.ok) return { reason: `Jev HTTP ${response.status}` };
-    const choice = choiceFromJev(JSON.parse(response.text));
-    if (!choice) return { reason: "Jev answer invalid" };
+    const latencyMs = (await now($)) - started;
+    if (response === timeout) return { reason: "Jev timeout", jevError: true, latencyMs };
+    if (!response.ok) return { reason: `Jev HTTP ${response.status}`, jevError: true, latencyMs };
+    const body = JSON.parse(response.text);
+    const choice = choiceFromJev(body);
+    const tokens = body?.usage?.input_tokens;
+    const jevInputTokens = Number.isSafeInteger(tokens) && tokens >= 0 ? tokens : undefined;
+    const measured = { latencyMs, ...(jevInputTokens === undefined ? {} : { jevInputTokens }) };
+    if (!choice) return { reason: "Jev answer invalid", jevError: true, ...measured };
     if (choice.confidence < CONFIDENCE_FLOOR) {
       return { tier: choice.tier, confidence: choice.confidence, effort: choice.effort,
-        reason: "Jev tier confidence below 0.8" };
+        reason: "Jev tier confidence below 0.8", ...measured };
     }
-    const model = choice.tier === "fast"
-      ? await $.env.get("JAO_CLAUDE_FAST_MODEL") || MODELS.fast
-      : choice.tier === "balanced"
-        ? await $.env.get("JAO_CLAUDE_BALANCED_MODEL") || MODELS.balanced
-        : await $.env.get("JAO_CLAUDE_STRONG_MODEL") || MODELS.strong;
-    return { ...choice, model, reason: "Jev choice" };
+    return { ...choice, model: await modelFor($, choice.tier), reason: "Jev choice", ...measured };
   } catch {
-    return { reason: "Jev request failed" };
+    return { reason: "Jev request failed", jevError: true };
   }
+}
+
+async function now($) {
+  return typeof $.clock.now === "function" ? $.clock.now() : Date.now();
+}
+
+// Appends one JSONL event per call in the same shape `jao report` reads for Codex.
+// Only models, reasons, counts and timings are written, never prompt or answer text.
+function metricsWriter($) {
+  let chain = Promise.resolve();
+  return (event) => {
+    chain = chain.then(async () => {
+      if ((await $.env.get("JAO_CLAUDE_METRICS")) === "0") return;
+      const file = (await envFile($)).replace(/[^/\\]*$/, ".local/claude.jsonl");
+      let text = "";
+      try { text = await $.fs.read(file); } catch { /* A missing log starts empty. */ }
+      text += `${JSON.stringify(event)}\n`;
+      if (text.length > METRICS_MAX_BYTES) text = text.slice(text.indexOf("\n", text.length - METRICS_MAX_BYTES) + 1);
+      await $.fs.write(file, text);
+    }).catch(() => { /* Metrics must never block a turn. */ });
+    return chain;
+  };
+}
+
+function decisionEvent(at, turnId, route) {
+  const result = route.jevError ? "error" : route.model ? "routed" : "kept";
+  return { at, client: "claude", mode: "auto", result, model: route.model ?? "claude-session",
+    ...(route.effort ? { effort: route.effort, recommendedEffort: route.effort } : {}),
+    ...(route.tier ? { recommendedTier: route.tier } : {}),
+    ...(typeof route.confidence === "number" ? { confidence: route.confidence } : {}),
+    ...(typeof route.latencyMs === "number" ? { latencyMs: route.latencyMs } : {}),
+    ...(typeof route.jevInputTokens === "number" ? { jevInputTokens: route.jevInputTokens } : {}),
+    requestId: `${turnId}:decision`, taskId: turnId, reason: route.reason };
 }
 
 function statusOf(enabled, last) {
@@ -148,6 +220,8 @@ export function register(on) {
   let enabled = false;
   let footerEnabled = true;
   let last = null;
+  let contextTokens = 0;
+  let record = null;
 
   // Drawn only: the prompt footer's mode label never enters the transcript, so the
   // model cannot imitate it on a later turn. (Terminal and desktop surfaces.)
@@ -160,6 +234,7 @@ export function register(on) {
   on("session.start", async ($, e, next) => {
     enabled = (await $.env.get("JAO_CLAUDE_AUTO")) === "1";
     footerEnabled = (await $.env.get("JAO_RESPONSE_FOOTER")) !== "0";
+    record = metricsWriter($);
     await $.command.register({ name: "jao-route", description: "Show the last Jev route and API model" });
     return next(e);
   });
@@ -170,11 +245,14 @@ export function register(on) {
     if (enabled) {
       let route;
       try {
-        route = await routeTurn($, e.text);
+        route = await routeTurn($, e.text, contextTokens);
       } catch {
         route = { reason: "router error" };
       }
+      route.startedAt = await now($);
+      route.steps = 0;
       routes.set(e.turnId, route);
+      void record?.(decisionEvent(new Date(route.startedAt).toISOString(), e.turnId, route));
       last = route;
       while (routes.size > MAX_CACHED_TURNS) routes.delete(routes.keys().next().value);
     }
@@ -190,10 +268,22 @@ export function register(on) {
       route.requestedEffort = request.effort;
       $.ui.invalidate("ui.render");
     }
+    const stepStarted = route ? await now($) : 0;
     for await (const chunk of next(request)) {
-      if (route && chunk.kind === "stop" && chunk.usage?.model) {
-        route.servedModel = chunk.usage.model;
-        $.ui.invalidate("ui.render");
+      if (chunk.kind === "stop" && chunk.usage && e.agentId === undefined) {
+        const usage = chunk.usage;
+        const cached = usage.cache_read_input_tokens ?? 0;
+        const input = (usage.input_tokens ?? 0) + cached + (usage.cache_creation_input_tokens ?? 0);
+        contextTokens = input + (usage.output_tokens ?? 0);
+        if (route && typeof usage.model === "string") {
+          route.servedModel = usage.model;
+          $.ui.invalidate("ui.render");
+          const at = await now($);
+          void record?.({ at: new Date(at).toISOString(), client: "claude", kind: "response",
+            requestId: `${e.turnId}:${route.steps++}`, taskId: e.turnId, requestDurationMs: at - stepStarted,
+            requestedModel: request.model, ...(typeof request.effort === "string" ? { requestedEffort: request.effort } : {}),
+            servedModel: usage.model, inputTokens: input, cachedInputTokens: cached, outputTokens: usage.output_tokens ?? 0 });
+        }
       }
       yield chunk;
     }

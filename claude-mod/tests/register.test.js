@@ -7,6 +7,7 @@ function harness({ answer = "fast", confidence = 0.95, effortScore = 2.8, env = 
   const requests = [];
   const registered = [];
   const invalidated = [];
+  const files = new Map();
   register((event, matcher, handler) => {
     hooks.set(handler && matcher?.component ? `${event}:${matcher.component}` : event, handler ?? matcher);
   });
@@ -14,7 +15,14 @@ function harness({ answer = "fast", confidence = 0.95, effortScore = 2.8, env = 
     plugin: { root: "/router/claude-mod" },
     ui: { invalidate: (event) => invalidated.push(event) },
     env: { get: async (name) => ({ JAO_CLAUDE_AUTO: "1", ...env })[name] },
-    fs: { read: async () => "TYPESAFE_API_KEY=test-key\n" },
+    fs: {
+      read: async (path) => {
+        if (files.has(path)) return files.get(path);
+        if (path.endsWith(".env")) return "TYPESAFE_API_KEY=test-key\n";
+        throw new Error("ENOENT");
+      },
+      write: async (path, text) => { files.set(path, text); },
+    },
     clock: { sleep: () => new Promise(() => {}) },
     command: { register: async (spec) => registered.push(spec) },
     http: {
@@ -52,7 +60,9 @@ function harness({ answer = "fast", confidence = 0.95, effortScore = 2.8, env = 
   const complete = (turnId, extra = {}, text = "Answer") => hooks.get("turn.complete")($, {
     turnId, reason: "answer", answer: "Answer", usage: { model: "claude-served" }, ...extra,
   }, async () => ({ text }));
-  return { $, requests, registered, invalidated, session, start, step, render, status, complete };
+  const metrics = () => (files.get("/router/claude-mod/../.local/claude.jsonl") ?? "")
+    .split("\n").filter(Boolean).map((line) => JSON.parse(line));
+  return { $, hooks, files, metrics, requests, registered, invalidated, session, start, step, render, status, complete };
 }
 
 test("parses a local env file without exposing other entries", () => {
@@ -135,7 +145,7 @@ test("the prompt footer shows the requested model and effort, also on skipped tu
   const h = harness();
   await h.session();
   assert.deepEqual((await h.render("SessionMode", { modes: ["focus"] })).props.modes, ["focus", "Jev Auto"]);
-  for (const prompt of ["안녕", "Please inspect the secret: abcdefghijklmnop"]) {
+  for (const prompt of ["ok", "Please inspect the secret: abcdefghijklmnop"]) {
     await h.start("t", prompt);
     assert.equal(h.requests.length, 0);
     const step = await h.step("t", undefined, "Hello.");
@@ -192,8 +202,58 @@ test("completion leaves subagents, interruptions, disabled routing and footer op
 
 test("missing served model does not claim a mismatch", async () => {
   const h = harness();
-  await h.start("t", "Hi");
+  await h.start("t", "ok");
   await h.step("t");
   assert.equal((await h.complete("t", { usage: undefined }, "Other plugin synopsis")).text,
     "Other plugin synopsis\n\nJev Auto · claude-sonnet-5 · effort medium");
+});
+
+test("greetings and supplied-text corrections route locally to the fast model without Jev", async () => {
+  const h = harness({ answer: "strong" });
+  for (const prompt of ["안녕하세요", 'Fix the spelling: "i has an apple today"']) {
+    await h.start("t", prompt);
+    const { sent } = await h.step("t");
+    assert.equal(sent.model, "claude-haiku-4-5");
+    assert.equal(sent.effort, "low");
+  }
+  assert.equal(h.requests.length, 0);
+});
+
+test("a simple turn keeps the session model once the context is large enough to lose its warm cache", async () => {
+  const h = harness();
+  await h.start("t1", "Please implement this straightforward little change.");
+  const next = async function* (request) {
+    yield { kind: "stop", usage: { model: request.model, input_tokens: 10, cache_read_input_tokens: 30_000,
+      cache_creation_input_tokens: 0, output_tokens: 5 }, stopReason: "end_turn" };
+  };
+  for await (const _ of h.hooks.get("turn.step")(h.$,
+    { turnId: "t1", index: 0, model: "claude-sonnet-5", effort: "medium", messageCount: 1 }, next)) { /* drain */ }
+  await h.start("t2", "안녕");
+  assert.equal((await h.step("t2")).sent.model, "claude-sonnet-5");
+  assert.equal(h.requests.length, 1);
+});
+
+test("decisions and served responses are logged for jao report without prompt text", async () => {
+  const h = harness();
+  await h.start("t", "Please implement this straightforward little change.");
+  await h.step("t");
+  await h.complete("t");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const [decision, response] = h.metrics();
+  assert.equal(decision.client, "claude");
+  assert.equal(decision.result, "routed");
+  assert.equal(decision.recommendedTier, "fast");
+  assert.equal(decision.taskId, "t");
+  assert.equal(response.kind, "response");
+  assert.equal(response.servedModel, "claude-haiku-4-5");
+  assert.equal(response.taskId, "t");
+  assert.doesNotMatch(h.files.get("/router/claude-mod/../.local/claude.jsonl"), /straightforward/);
+});
+
+test("metrics can be turned off", async () => {
+  const h = harness({ env: { JAO_CLAUDE_METRICS: "0" } });
+  await h.start("t", "Please implement this straightforward little change.");
+  await h.step("t");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(h.metrics(), []);
 });

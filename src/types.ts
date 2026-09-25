@@ -55,7 +55,7 @@ export type DecisionEvent = {
 
 export type ResponseObservationEvent = {
   at: string;
-  client: "codex";
+  client: "codex" | "claude";
   kind: "response";
   requestId: string;
   taskId?: string;
