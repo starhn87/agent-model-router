@@ -3,9 +3,9 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import test, { type TestContext } from "node:test";
 import { askJev } from "./jev.js";
-import { startCodexProxy, type ProxyOptions } from "./codex-proxy.js";
+import { CodexRouter, startCodexProxy, type ProxyOptions } from "./codex-proxy.js";
 import { AUTO_MODEL, defaultSettings } from "./policy.js";
-import type { DecisionEvent } from "./types.js";
+import type { DecisionEvent, ResponseObservationEvent } from "./types.js";
 
 const prompt = "합성 요청의 처리 결과를 한 문장으로 정리해줘";
 const requestBody = { model: AUTO_MODEL, prompt_cache_key: "integrity-test", input: [{ role: "user", content: prompt }] };
@@ -171,4 +171,67 @@ test("Jev timeout keeps the current model and records only sanitized metadata", 
   assert.equal(events.length, 1);
   assert.equal(events[0]?.reason, "jev-unavailable");
   for (const value of [prompt, "synthetic-jev-token", "TimeoutError"]) assert.equal(JSON.stringify(events).includes(value), false);
+});
+
+test("auto routing records the model actually served without changing SSE bytes", async (context) => {
+  const decisions: DecisionEvent[] = [];
+  const observations: ResponseObservationEvent[] = [];
+  const event = 'event: response.completed\ndata: {"type":"response.completed","response":{"model":"gpt-6-sol","usage":{"input_tokens":100,"input_tokens_details":{"cached_tokens":70},"output_tokens":8},"output":[{"text":"synthetic private answer"}]}}\n\n';
+  let requestedModel: unknown;
+  const proxy = await harness(context, async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    requestedModel = JSON.parse(Buffer.concat(chunks).toString()).model;
+    response.writeHead(200, { "content-type": "text/event-stream" });
+    response.write(event.slice(0, 17));
+    response.end(event.slice(17));
+  }, {
+    settings: defaultSettings("auto"), classify: async () => ({ tier: "fast", confidence: 0.95 }),
+    onDecision: (item) => decisions.push(item), onObservation: (item) => observations.push(item),
+  });
+  const response = await fetch(`${proxy.url}/responses`, { method: "POST", body: JSON.stringify(requestBody), signal: proxy.signal });
+  assert.equal(await response.text(), event);
+  assert.equal(requestedModel, "gpt-6-luna");
+  assert.equal(decisions.length, 1);
+  assert.equal(observations.length, 1);
+  assert.equal(decisions[0]?.requestId, observations[0]?.requestId);
+  assert.equal(observations[0]?.requestedModel, "gpt-6-luna");
+  assert.equal(observations[0]?.servedModel, "gpt-6-sol");
+  assert.equal(observations[0]?.cachedInputTokens, 70);
+  assert.equal(JSON.stringify(observations).includes("synthetic private answer"), false);
+  assert.equal(JSON.stringify(observations).includes(prompt), false);
+});
+
+test("Jev failure after a fast turn records the fallback model actually requested", async () => {
+  const events: DecisionEvent[] = [];
+  let calls = 0;
+  const router = new CodexRouter({ settings: defaultSettings("auto"),
+    classify: async () => {
+      calls += 1;
+      if (calls === 2) throw new Error("synthetic outage");
+      return { tier: "fast", confidence: 0.95 };
+    }, onDecision: (event) => events.push(event) });
+  assert.equal((await router.route(requestBody)).model, "gpt-6-luna");
+  assert.equal((await router.route(requestBody)).model, "gpt-6-sol");
+  assert.equal(events[1]?.result, "error");
+  assert.equal(events[1]?.model, "gpt-6-sol");
+});
+
+test("metrics sink failures cannot alter routing or interrupt completed responses", async (context) => {
+  let requestedModel: unknown;
+  const proxy = await harness(context, async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    requestedModel = JSON.parse(Buffer.concat(chunks).toString()).model;
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ status: "completed", model: "gpt-6-luna" }));
+  }, {
+    settings: defaultSettings("auto"), classify: async () => ({ tier: "fast", confidence: 0.95 }),
+    onDecision: () => { throw new Error("synthetic disk error"); },
+    onObservation: () => { throw new Error("synthetic disk error"); },
+  });
+  const response = await fetch(`${proxy.url}/responses`, { method: "POST", body: JSON.stringify(requestBody), signal: proxy.signal });
+  assert.equal(response.status, 200);
+  assert.equal(requestedModel, "gpt-6-luna");
+  assert.deepEqual(await response.json(), { status: "completed", model: "gpt-6-luna" });
 });

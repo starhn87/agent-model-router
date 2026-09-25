@@ -57,6 +57,15 @@ node --env-file=.env dist/cli.js codex --mode auto --metrics .local/codex.jsonl 
 
 시험에 사용한 기본 매핑은 `fast=gpt-6-luna`, `balanced=gpt-6-sol`, `strong=gpt-6-astra`입니다. 계정에서 사용 가능한 모델 이름을 확인하고 필요하면 `--fast-model`, `--balanced-model`, `--strong-model`, `--baseline-model`로 바꾸세요. Codex에서 `--model`을 직접 지정하면 그 모델을 우선하며 자동 라우팅을 건너뜁니다.
 
+잦은 모델 전환 뒤 캐시 재사용률이 떨어지는지 시험하려면 `--downgrade-confidence 0.9`를 추가할 수 있습니다. [OpenAI 프롬프트 캐싱 문서](https://developers.openai.com/api/docs/guides/prompt-caching)는 모델 변경이 캐시 동작에 영향을 줄 수 있다고 설명합니다. 이 옵션은 Jev가 현재보다 낮은 등급을 추천했더라도 신뢰도가 0.9 미만이면 현재 모델을 유지하고 `downgrade-held`로 기록합니다. 상향 전환과 기본 0.8 신뢰도 기준은 그대로입니다. 0.9는 검증된 최적값이 아니므로 기본값으로 켜지 않으며, 아래 응답 사용량 기록을 보고 조정하세요.
+
+```bash
+node --env-file=.env dist/cli.js codex --mode auto --downgrade-confidence 0.9 --metrics .local/codex.jsonl -- exec "함수 버그를 분석해줘"
+node dist/cli.js report .local/codex.jsonl
+```
+
+지표에는 라우터가 **요청한 모델**과 완료된 Codex 응답이 보고한 **실제 모델 ID**를 별도 행으로 남깁니다. 같은 `requestId`로 두 행을 연결할 수 있습니다. `observedResponses`는 확인된 API 응답 수, `differentModelIds`는 요청·응답 모델 ID가 정확히 다르게 나온 수, `observedCacheReadRate`는 관찰된 입력 토큰 중 캐시에서 읽은 비율입니다. 날짜가 붙은 모델 ID처럼 이름만 다를 수도 있으므로 `differentModelIds`만으로 잘못된 등급이라고 단정하지 마세요. 도구 연속 요청에는 새 Jev 판정 없이 응답 관찰 행만 생길 수 있습니다. 관찰은 완료된 비압축 Responses JSON 또는 SSE에서만 기록하며, 4MiB를 넘는 이벤트·본문은 건너뜁니다. 응답 원문과 프롬프트는 기록하지 않습니다.
+
 ## Codex 데스크톱 연결 준비
 
 데스크톱 연결은 `~/.codex/config.toml`을 직접 편집하는 고급 시험입니다. 라우터는 이 파일을 자동으로 바꾸지 않습니다. 먼저 원래 설정을 백업하고, 별도 터미널에서 `127.0.0.1` 전용 서버를 실행합니다.
@@ -170,6 +179,6 @@ node dist/cli.js report .local/codex.jsonl
 - [TypeSafe Jev API](https://docs.typesafe.ai/api) · [모델/가격](https://docs.typesafe.ai/models)
 - [Claude Code 훅](https://code.claude.com/docs/en/hooks) · [게이트웨이 연결](https://code.claude.com/docs/en/llm-gateway-connect)
 
-Codex 프로토콜 연결 방식은 [jev-router](https://github.com/gargpratyush/jev-router)의 구현을 참고해 독립적으로 작성했습니다. Claude 구독 자격 증명 중계 방식은 채택하지 않았습니다.
+Codex 프로토콜 연결 방식은 [jev-router](https://github.com/gargpratyush/jev-router)의 구현을 참고해 독립적으로 작성했습니다. 모델 전환의 캐시 영향과 요청 모델·실제 응답 모델을 구분하는 관찰 방식은 [jev-model-router](https://github.com/satviksinha/jev-model-router)를 참고했습니다. Claude 구독 자격 증명 중계 방식은 채택하지 않았습니다.
 
 Claude 함수 훅의 연결 방식은 [jev-model-router](https://github.com/satviksinha/jev-model-router)와 [Claude Code Mods 소스](https://github.com/anthropics/claude-code/tree/main/mods)를 참고해 독립적으로 구현했습니다.

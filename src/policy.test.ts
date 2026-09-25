@@ -37,3 +37,14 @@ test("choice cannot select a model missing from the account catalog", () => {
   const allowed = new Set(["gpt-6-sol"]);
   assert.equal(chooseModel(query, { tier: "strong", confidence: 0.95 }, settings, allowed).reason, "model-unavailable");
 });
+
+test("optional downgrade confidence holds uncertain cheaper choices but never blocks upgrades", () => {
+  const sticky = { ...settings, minimumDowngradeConfidence: 0.9 };
+  const strong = { ...query, currentModel: "gpt-6-astra" };
+  assert.deepEqual(chooseModel(strong, { tier: "fast", confidence: 0.85 }, sticky), {
+    model: "gpt-6-astra", tier: "fast", confidence: 0.85, reason: "downgrade-held",
+  });
+  assert.equal(chooseModel(strong, { tier: "fast", confidence: 0.95 }, sticky).model, "gpt-6-luna");
+  assert.equal(chooseModel({ ...query, currentModel: "gpt-6-luna" }, { tier: "strong", confidence: 0.85 }, sticky).model, "gpt-6-astra");
+  assert.equal(chooseModel(strong, { tier: "fast", confidence: 0.85 }, settings).model, "gpt-6-luna");
+});

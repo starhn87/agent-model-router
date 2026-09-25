@@ -1,10 +1,12 @@
 import http, { type IncomingHttpHeaders, type IncomingMessage, type ServerResponse } from "node:http";
 import https from "node:https";
 import type { AddressInfo } from "node:net";
+import { randomUUID } from "node:crypto";
 import { askJev } from "./jev.js";
 import { codexSessionKey, estimateContextTokens, latestUserTurn, type CodexBody } from "./codex-request.js";
+import { CodexResponseObserver, type ObservedResponse } from "./codex-response.js";
 import { AUTO_MODEL, chooseModel, fallbackModel, routingGuard } from "./policy.js";
-import type { DecisionEvent, RouteChoice, RouteQuery, RouteResult, RouterSettings } from "./types.js";
+import type { DecisionEvent, ResponseObservationEvent, RouteChoice, RouteQuery, RouteResult, RouterSettings } from "./types.js";
 
 const CHATGPT_CODEX_URL = "https://chatgpt.com/backend-api/codex";
 const MAX_REQUEST_BYTES = 32 * 1024 * 1024;
@@ -16,6 +18,7 @@ export type ProxyOptions = {
   upstreamBaseUrl?: string;
   classify?: (query: RouteQuery) => Promise<RouteChoice>;
   onDecision?: (event: DecisionEvent) => void;
+  onObservation?: (event: ResponseObservationEvent) => void;
 };
 
 type CatalogModel = {
@@ -34,13 +37,29 @@ export class CodexRouter {
   private readonly sessions = new Map<string, string>();
   private readonly catalog = new Map<string, CatalogModel>();
   private readonly classify: (query: RouteQuery) => Promise<RouteChoice>;
+  private metricsWarningShown = false;
 
   constructor(private readonly options: ProxyOptions) {
     this.classify = options.classify ?? ((query) => askJev(query));
   }
 
-  private report(event: Omit<DecisionEvent, "at" | "mode" | "client">): void {
-    this.options.onDecision?.({ at: new Date().toISOString(), client: "codex", mode: this.options.settings.mode, ...event });
+  private report(event: Omit<DecisionEvent, "at" | "mode" | "client">, requestId?: string): void {
+    try {
+      this.options.onDecision?.({ at: new Date().toISOString(), client: "codex", mode: this.options.settings.mode, ...event, requestId });
+    } catch { this.warnMetricsFailure(); }
+  }
+
+  recordObservation(requestId: string, requestedModel: string, observed: ObservedResponse): void {
+    try {
+      this.options.onObservation?.({ at: new Date().toISOString(), client: "codex", kind: "response",
+        requestId, requestedModel, ...observed });
+    } catch { this.warnMetricsFailure(); }
+  }
+
+  private warnMetricsFailure(): void {
+    if (this.metricsWarningShown) return;
+    this.metricsWarningShown = true;
+    process.stderr.write("[amr] metrics sink unavailable\n");
   }
 
   private remember(key: string, model: string): void {
@@ -84,7 +103,7 @@ export class CodexRouter {
     }
   }
 
-  async route(body: CodexBody): Promise<CodexBody> {
+  async route(body: CodexBody, requestId?: string): Promise<CodexBody> {
     if (body.model !== AUTO_MODEL) return body; // Explicit model choices remain untouched.
 
     const { settings } = this.options;
@@ -110,9 +129,9 @@ export class CodexRouter {
         void this.classify(query).then((choice) => {
           const recommendation = chooseModel(query, choice, settings, this.allowedModels());
           this.report({ result: "shadow", model: currentModel, recommendedTier: recommendation.tier,
-            confidence: recommendation.confidence, latencyMs: Date.now() - started, jevInputTokens: choice.inputTokens, reason: recommendation.reason });
+            confidence: recommendation.confidence, latencyMs: Date.now() - started, jevInputTokens: choice.inputTokens, reason: recommendation.reason }, requestId);
         }).catch(() => {
-          this.report({ result: "error", model: currentModel, latencyMs: Date.now() - started, reason: "jev-unavailable" });
+          this.report({ result: "error", model: currentModel, latencyMs: Date.now() - started, reason: "jev-unavailable" }, requestId);
         });
         result = { model: currentModel, reason: "shadow-mode" };
       } else {
@@ -122,15 +141,15 @@ export class CodexRouter {
           result = chooseModel(query, choice, settings, this.allowedModels());
           this.report({ result: result.model === currentModel ? "kept" : "routed", model: result.model,
             recommendedTier: result.tier, confidence: result.confidence, latencyMs: Date.now() - started,
-            jevInputTokens: choice.inputTokens, reason: result.reason });
+            jevInputTokens: choice.inputTokens, reason: result.reason }, requestId);
         } catch {
           result = { model: fallbackModel(currentModel, settings), reason: "jev-unavailable" };
-          this.report({ result: "error", model: currentModel, latencyMs: Date.now() - started, reason: result.reason });
+          this.report({ result: "error", model: result.model, latencyMs: Date.now() - started, reason: result.reason }, requestId);
         }
       }
       if (key) this.remember(key, result.model);
       if (settings.mode === "pass" || settings.mode === "force" || guard) {
-        this.report({ result: result.model === currentModel ? "kept" : "routed", model: result.model, reason: result.reason });
+        this.report({ result: result.model === currentModel ? "kept" : "routed", model: result.model, reason: result.reason }, requestId);
       }
     }
 
@@ -181,6 +200,8 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
   const isResponse = request.method === "POST" && /^\/(?:v1\/)?responses(?:\?|$)/.test(rawPath);
   const isCatalog = request.method === "GET" && /^\/(?:v1\/)?models(?:\?|$)/.test(rawPath);
   let body: Buffer;
+  let requestedModel: string | undefined;
+  let requestId: string | undefined;
   try {
     body = await readRequest(request);
   } catch {
@@ -190,7 +211,9 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     try {
       const parsed = JSON.parse(body.toString("utf8"));
       if (!isRecord(parsed)) throw new Error("body is not object");
-      const routed = await router.route(parsed);
+      if (parsed.model === AUTO_MODEL) requestId = randomUUID();
+      const routed = await router.route(parsed, requestId);
+      if (requestId && typeof routed.model === "string") requestedModel = routed.model;
       body = Buffer.from(JSON.stringify(routed));
     } catch {
       return respondError(response, 400, "invalid response request");
@@ -211,6 +234,21 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     upstreamResponse.on("error", () => respondError(response, 502, "upstream unavailable"));
     const responseHeaders = withoutHopHeaders(upstreamResponse.headers);
     if (!isCatalog) {
+      const status = upstreamResponse.statusCode ?? 502;
+      if (isResponse && requestId && requestedModel && status >= 200 && status < 300) {
+        const contentType = upstreamResponse.headers["content-type"];
+        const contentEncoding = upstreamResponse.headers["content-encoding"];
+        const observer = new CodexResponseObserver(
+          Array.isArray(contentType) ? contentType[0] : contentType,
+          Array.isArray(contentEncoding) ? contentEncoding[0] : contentEncoding,
+        );
+        upstreamResponse.on("data", (chunk: Buffer) => observer.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+        upstreamResponse.on("end", () => {
+          if (!upstreamResponse.complete) return;
+          const observed = observer.finish();
+          if (observed) router.recordObservation(requestId!, requestedModel!, observed);
+        });
+      }
       response.writeHead(upstreamResponse.statusCode ?? 502, responseHeaders);
       upstreamResponse.pipe(response);
       return;

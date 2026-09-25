@@ -46,5 +46,12 @@ export function chooseModel(
   if (allowedModels?.size && !allowedModels.has(model)) {
     return { model: fallbackModel(query.currentModel, settings), tier: choice.tier, confidence: choice.confidence, reason: "model-unavailable" };
   }
+  const tiers: (keyof RouterSettings["models"])[] = ["fast", "balanced", "strong"];
+  const currentRank = tiers.findIndex((tier) => settings.models[tier] === query.currentModel);
+  const nextRank = tiers.indexOf(choice.tier);
+  if (settings.minimumDowngradeConfidence !== undefined && currentRank >= 0 && nextRank < currentRank &&
+      choice.confidence < settings.minimumDowngradeConfidence) {
+    return { model: query.currentModel, tier: choice.tier, confidence: choice.confidence, reason: "downgrade-held" };
+  }
   return { model, tier: choice.tier, confidence: choice.confidence, reason: model === query.currentModel ? "same-model" : "jev-choice" };
 }

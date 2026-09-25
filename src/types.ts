@@ -27,6 +27,7 @@ export type RouterSettings = {
   forceModel?: string;
   models: Record<Tier, string>;
   minimumConfidence: number;
+  minimumDowngradeConfidence?: number;
   maxContextTokens: number;
 };
 
@@ -40,5 +41,20 @@ export type DecisionEvent = {
   confidence?: number;
   latencyMs?: number;
   jevInputTokens?: number;
+  requestId?: string;
   reason: string;
 };
+
+export type ResponseObservationEvent = {
+  at: string;
+  client: "codex";
+  kind: "response";
+  requestId: string;
+  requestedModel: string;
+  servedModel: string;
+  inputTokens?: number;
+  cachedInputTokens?: number;
+  outputTokens?: number;
+};
+
+export type MetricsEvent = DecisionEvent | ResponseObservationEvent;

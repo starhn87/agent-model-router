@@ -7,7 +7,7 @@ import { startCodexProxy } from "./codex-proxy.js";
 import { observeClaudePrompt } from "./claude-shadow.js";
 import { askJev } from "./jev.js";
 import { readLoginKeychainPassword } from "./keychain.js";
-import { writeDecision } from "./metrics.js";
+import { writeMetric } from "./metrics.js";
 import { defaultSettings } from "./policy.js";
 import { readMetricsFile } from "./report.js";
 import { evaluateCases, readEvaluationCases } from "./evaluate.js";
@@ -38,6 +38,11 @@ function parseOptions(args: string[]): Parsed {
       const tier = flag.slice(2, -6) as Tier;
       settings.models[tier] = value;
     } else if (flag === "--metrics") metricsFile = value;
+    else if (flag === "--downgrade-confidence") {
+      const confidence = Number(value);
+      if (!Number.isFinite(confidence) || confidence <= 0 || confidence > 1) throw new Error(`invalid downgrade confidence: ${value}`);
+      settings.minimumDowngradeConfidence = confidence;
+    }
     else if (flag === "--keychain-service") keychainService = value;
     else if (flag === "--keychain-account") keychainAccount = value;
     else if (flag === "--port") {
@@ -47,6 +52,9 @@ function parseOptions(args: string[]): Parsed {
     index += 2;
   }
   if (settings.mode === "force" && !settings.forceModel) throw new Error("--force-model is required in force mode");
+  if (settings.minimumDowngradeConfidence !== undefined && settings.minimumDowngradeConfidence < settings.minimumConfidence) {
+    throw new Error("--downgrade-confidence must be at least the minimum routing confidence");
+  }
   return { settings, metricsFile, port, keychainService, keychainAccount, remaining: args.slice(index) };
 }
 
@@ -78,7 +86,8 @@ async function runCodex(parsed: Parsed): Promise<void> {
   const spec = keychainSpec(parsed.keychainService, parsed.keychainAccount);
   const command = resolveCodex();
   const classify = parsed.settings.mode === "pass" || parsed.settings.mode === "force" ? undefined : await keychainClassifier(spec);
-  const proxy = await startCodexProxy({ settings: parsed.settings, classify, onDecision: (event) => writeDecision(event, parsed.metricsFile) });
+  const proxy = await startCodexProxy({ settings: parsed.settings, classify,
+    onDecision: (event) => writeMetric(event, parsed.metricsFile), onObservation: (event) => writeMetric(event, parsed.metricsFile) });
   const baseUrl = `http://127.0.0.1:${proxy.port}`;
   if (parsed.settings.mode === "auto" && !spec && !process.env.TYPESAFE_API_KEY && !process.env.JEV_API_KEY) {
     process.stderr.write("[amr] No TypeSafe key; Auto will retain the current model.\n");
@@ -98,7 +107,7 @@ async function runServer(parsed: Parsed): Promise<void> {
   const spec = keychainSpec(parsed.keychainService, parsed.keychainAccount);
   const classify = parsed.settings.mode === "pass" || parsed.settings.mode === "force" ? undefined : await keychainClassifier(spec);
   const proxy = await startCodexProxy({ settings: parsed.settings, port: parsed.port ?? 8765,
-    classify, onDecision: (event) => writeDecision(event, parsed.metricsFile) });
+    classify, onDecision: (event) => writeMetric(event, parsed.metricsFile), onObservation: (event) => writeMetric(event, parsed.metricsFile) });
   process.stdout.write(`Agent Model Router listening on http://127.0.0.1:${proxy.port}\n`);
   await new Promise<void>((resolve) => {
     process.once("SIGINT", resolve);
@@ -148,7 +157,7 @@ function help(): void {
     `  amr evaluate FILE --max-calls N [--keychain-service NAME --keychain-account USER]  (paid Jev calls)\n\n` +
     `Router options: --mode pass|force|shadow|auto, --force-model ID,\n` +
     `  --baseline-model ID, --fast-model ID, --balanced-model ID,\n` +
-    `  --strong-model ID, --metrics FILE, --port PORT,\n` +
+    `  --strong-model ID, --downgrade-confidence 0..1, --metrics FILE, --port PORT,\n` +
     `  --keychain-service NAME, --keychain-account USER\n`);
 }
 

@@ -14,3 +14,15 @@ test("summary computes latency, decisions, and Jev-only input cost", () => {
   assert.equal(summary.jevInputTokens, 3000);
   assert.ok(Math.abs(summary.estimatedJevUsd - 0.000126) < 1e-10);
 });
+
+test("response observations show served models and cache reads without doubling decision counts", () => {
+  const input = [
+    { client: "codex", result: "routed", model: "gpt-6-luna" },
+    { client: "codex", kind: "response", requestedModel: "gpt-6-luna", servedModel: "gpt-6-sol", inputTokens: 100, cachedInputTokens: 75, outputTokens: 10 },
+  ].map((event) => JSON.stringify(event)).join("\n");
+  const summary = summarizeMetrics(input);
+  assert.equal(summary.total, 1);
+  assert.equal(summary.observedResponses, 1);
+  assert.equal(summary.differentModelIds, 1);
+  assert.equal(summary.observedCacheReadRate, 0.75);
+});

@@ -1,6 +1,6 @@
 import { askJev } from "./jev.js";
 import { routingGuard, defaultSettings } from "./policy.js";
-import { writeDecision } from "./metrics.js";
+import { writeMetric } from "./metrics.js";
 import type { DecisionEvent, RouteChoice, RouteQuery } from "./types.js";
 
 type ClaudeHookInput = { hook_event_name?: unknown; prompt?: unknown };
@@ -28,6 +28,6 @@ export async function observeClaudePrompt(
         latencyMs: Date.now() - started, reason: "jev-unavailable" };
     }
   }
-  writeDecision(event, metricsFile);
+  writeMetric(event, metricsFile);
   return event;
 }
