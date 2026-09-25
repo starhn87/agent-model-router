@@ -268,7 +268,7 @@ export async function install(client: Client, context: InstallContext): Promise<
   return `${client} 설치 완료. 설정 백업: ${join(context.home, ".jev-agent-optimizer/backups")}\n` +
     (codex ? "Codex: 로그인 시 서버가 자동 시작됩니다. 앱을 재시작하고 새 작업에서 Jev Auto를 선택하세요. 검색·기억 스킬도 연결됐습니다.\n" : "") +
     (claude ? "Claude: 새 CLI/Code 탭 세션부터 자동 적용됩니다. /jao-route로 확인하세요. 검색·기억 스킬도 연결됐습니다.\n" : "") +
-    "응답 시작에 선택 모델과 요청 effort가 표시되고, 실제 모델이 다를 때만 끝에 알립니다. npm run doctor로 설치 상태를 확인하세요.\n";
+    "응답 시작에 선택 모델과 요청 effort가 표시되고(Claude는 화면 표시만), 실제 모델이 다를 때만 끝에 알립니다. npm run doctor로 설치 상태를 확인하세요.\n";
 }
 
 export function uninstall(client: Client, context: InstallContext): string {

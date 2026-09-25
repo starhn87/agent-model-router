@@ -6,11 +6,13 @@ function harness({ answer = "fast", confidence = 0.95, effortScore = 2.8, env = 
   const hooks = new Map();
   const requests = [];
   const registered = [];
+  const invalidated = [];
   register((event, matcher, handler) => {
-    hooks.set(event, handler ?? matcher);
+    hooks.set(handler && matcher?.component ? `${event}:${matcher.component}` : event, handler ?? matcher);
   });
   const $ = {
     plugin: { root: "/router/claude-mod" },
+    ui: { invalidate: (event) => invalidated.push(event) },
     env: { get: async (name) => ({ JAO_CLAUDE_AUTO: "1", ...env })[name] },
     fs: { read: async () => "TYPESAFE_API_KEY=test-key\n" },
     clock: { sleep: () => new Promise(() => {}) },
@@ -26,10 +28,13 @@ function harness({ answer = "fast", confidence = 0.95, effortScore = 2.8, env = 
     },
   };
   const forward = async (input) => input;
+  const session = () => hooks.get("session.start")($, {}, forward);
   const start = async (turnId, text) => {
-    await hooks.get("session.start")($, {}, forward);
+    await session();
     await hooks.get("turn.start")($, { turnId, text }, forward);
   };
+  const render = (component, props, requestId = "m-1") =>
+    hooks.get(`ui.render:${component}`)($, { surface: "terminal", component, requestId, props }, forward);
   const step = async (turnId, agentId, text, served) => {
     let sent;
     const next = async function* (request) {
@@ -47,7 +52,7 @@ function harness({ answer = "fast", confidence = 0.95, effortScore = 2.8, env = 
   const complete = (turnId, extra = {}, text = "Answer") => hooks.get("turn.complete")($, {
     turnId, reason: "answer", answer: "Answer", usage: { model: "claude-served" }, ...extra,
   }, async () => ({ text }));
-  return { $, requests, registered, start, step, status, complete };
+  return { $, requests, registered, invalidated, session, start, step, render, status, complete };
 }
 
 test("parses a local env file without exposing other entries", () => {
@@ -88,7 +93,7 @@ test("skips sensitive prompts and leaves the session model on low confidence", a
   assert.equal(sensitive.requests.length, 0);
   assert.equal((await sensitive.step("turn-1")).sent.model, "claude-sonnet-5");
   assert.equal((await sensitive.step("turn-1", undefined, "Kept the session model.")).chunks[0].text,
-    "> ✳️ 선택 모델: claude-sonnet-5 · 요청 effort: medium\n\n---\n\nKept the session model.");
+    "Kept the session model.");
 
   const uncertain = harness({ confidence: 0.5 });
   await uncertain.start("turn-2", "Please implement this straightforward little change.");
@@ -118,28 +123,50 @@ test("completion displays actual model and requested effort once, without replac
   assert.equal((await h.complete("t")).text, "Answer");
 });
 
-test("first main-loop text announces the selected route once", async () => {
+test("reply text streams unchanged; the first reply block is drawn with the route once per turn", async () => {
   const h = harness();
   await h.start("t", "Fix the spelling of this short example sentence.");
   const first = await h.step("t", undefined, "Corrected sentence.");
-  assert.equal(first.chunks[0].text,
-    "> ✳️ 선택 모델: claude-haiku-4-5 · 요청 effort: xhigh\n\n---\n\nCorrected sentence.");
-  const next = await h.step("t", undefined, "More text.");
-  assert.equal(next.chunks[0].text, "More text.");
-  const subagent = await h.step("t", "agent-1", "Tool result.");
-  assert.equal(subagent.chunks[0].text, "Tool result.");
+  assert.equal(first.chunks[0].text, "Corrected sentence.");
+  assert.equal((await h.step("t", "agent-1", "Tool result.")).chunks[0].text, "Tool result.");
+  const banner = "> ✳️ Jev Auto · claude-haiku-4-5 · effort xhigh\n\n---\n\n";
+  const block = { text: "Corrected sentence.", isFirstOfReply: true };
+  assert.equal((await h.render("AssistantMessage", block, "m-1")).props.text, `${banner}Corrected sentence.`);
+  // A redraw of that block keeps its banner; later blocks and messages of the turn get none.
+  assert.equal((await h.render("AssistantMessage", block, "m-1")).props.text, `${banner}Corrected sentence.`);
+  assert.equal((await h.render("AssistantMessage", { text: "More.", isFirstOfReply: false }, "m-1")).props.text, "More.");
+  assert.equal((await h.render("AssistantMessage", { text: "Second.", isFirstOfReply: true }, "m-2")).props.text, "Second.");
+  await h.complete("t");
+  assert.equal((await h.render("AssistantMessage", { text: "Later.", isFirstOfReply: true }, "m-3")).props.text, "Later.");
+  assert.ok(h.invalidated.includes("ui.render"));
 });
 
-test("short and skipped turns announce the session model and effort", async () => {
+test("the prompt footer shows the requested model and effort, also on skipped turns", async () => {
+  const h = harness();
+  await h.session();
+  assert.deepEqual((await h.render("SessionMode", { modes: ["focus"] })).props.modes, ["focus", "Jev Auto"]);
   for (const prompt of ["안녕", "Please inspect the secret: abcdefghijklmnop"]) {
-    const h = harness();
     await h.start("t", prompt);
     assert.equal(h.requests.length, 0);
     const step = await h.step("t", undefined, "Hello.");
     assert.equal(step.sent.model, "claude-sonnet-5");
     assert.equal(step.sent.effort, "medium");
-    assert.equal(step.chunks[0].text,
-      "> ✳️ 선택 모델: claude-sonnet-5 · 요청 effort: medium\n\n---\n\nHello.");
+    assert.equal(step.chunks[0].text, "Hello.");
+    assert.deepEqual((await h.render("SessionMode", { modes: [] })).props.modes,
+      ["Jev Auto · claude-sonnet-5 · effort medium"]);
+  }
+  await h.step("t", undefined, undefined, "claude-other");
+  assert.deepEqual((await h.render("SessionMode", { modes: [] })).props.modes,
+    ["Jev Auto · claude-sonnet-5 · effort medium ≠ claude-other"]);
+});
+
+test("drawing is left alone while routing or the footer is off", async () => {
+  for (const env of [{ JAO_CLAUDE_AUTO: "0" }, { JAO_RESPONSE_FOOTER: "0" }]) {
+    const h = harness({ env });
+    await h.start("t", "Fix the spelling of this short example sentence.");
+    await h.step("t", undefined, "Text.");
+    assert.deepEqual((await h.render("SessionMode", { modes: [] })).props.modes, []);
+    assert.equal((await h.render("AssistantMessage", { text: "Text.", isFirstOfReply: true })).props.text, "Text.");
   }
 });
 

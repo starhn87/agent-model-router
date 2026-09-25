@@ -129,11 +129,46 @@ function statusOf(enabled, last) {
   return `Jev Agent Optimizer: ${picked}${recommended}${requested}${served}.`;
 }
 
+const SAFE_MODEL = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
+
+// What the prompt footer and the first reply block show for a turn: the model and
+// effort the plugin actually requested, and the served model only when it differs.
+function routeLabel(route, { served = false } = {}) {
+  const model = typeof route.requestedModel === "string" && SAFE_MODEL.test(route.requestedModel) ? route.requestedModel : "확인 불가";
+  const effort = typeof route.requestedEffort === "string" && /^[a-z]+$/.test(route.requestedEffort) ? route.requestedEffort : "기본값";
+  const mismatch = served && typeof route.servedModel === "string" && SAFE_MODEL.test(route.servedModel) &&
+    model !== "확인 불가" && !sameModel(route.servedModel, model) ? ` ≠ ${route.servedModel}` : "";
+  return `Jev Auto · ${model} · effort ${effort}${mismatch}`;
+}
+
 export function register(on) {
   const routes = new Map();
+  const announced = new Map();
   let enabled = false;
   let footerEnabled = true;
   let last = null;
+  let current = null;
+
+  // Drawn only: the footer mode label and the reply banner never enter the transcript,
+  // so the model cannot imitate them on a later turn.
+  on("ui.render", { component: "SessionMode" }, ($, e, next) => {
+    if (!enabled || !footerEnabled) return next(e);
+    const label = last?.requestedModel ? routeLabel(last, { served: true }) : "Jev Auto";
+    return next({ ...e, props: { ...e.props, modes: [...e.props.modes, label] } });
+  });
+
+  on("ui.render", { component: "AssistantMessage" }, ($, e, next) => {
+    if (!enabled || !footerEnabled || !e.props.isFirstOfReply) return next(e);
+    let label = announced.get(e.requestId);
+    if (label === undefined && current?.requestedModel && !current.announcedMessage) {
+      current.announcedMessage = e.requestId;
+      label = routeLabel(current);
+      announced.set(e.requestId, label);
+      while (announced.size > MAX_CACHED_TURNS) announced.delete(announced.keys().next().value);
+    }
+    if (label === undefined) return next(e);
+    return next({ ...e, props: { ...e.props, text: `> ✳️ ${label}\n\n---\n\n${e.props.text}` } });
+  });
 
   on("session.start", async ($, e, next) => {
     enabled = (await $.env.get("JAO_CLAUDE_AUTO")) === "1";
@@ -154,6 +189,7 @@ export function register(on) {
       }
       routes.set(e.turnId, route);
       last = route;
+      current = route;
       while (routes.size > MAX_CACHED_TURNS) routes.delete(routes.keys().next().value);
     }
     return next(e);
@@ -163,18 +199,15 @@ export function register(on) {
     const route = e.agentId === undefined ? routes.get(e.turnId) : undefined;
     const request = route?.model || route?.effort
       ? { ...e, ...(route.model ? { model: route.model } : {}), ...(route.effort ? { effort: route.effort } : {}) } : e;
-    if (route) route.requestedEffort = request.effort;
+    if (route) {
+      route.requestedModel = request.model;
+      route.requestedEffort = request.effort;
+      $.ui.invalidate("ui.render");
+    }
     for await (const chunk of next(request)) {
-      if (route && footerEnabled && !route.announced && chunk.kind === "text" && chunk.text) {
-        route.announced = true;
-        const model = typeof request.model === "string" && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(request.model)
-          ? request.model : "확인 불가";
-        const effort = typeof request.effort === "string" && /^[a-z]+$/.test(request.effort) ? request.effort : "기본값";
-        yield { ...chunk, text: `> ✳️ 선택 모델: ${model} · 요청 effort: ${effort}\n\n---\n\n${chunk.text}` };
-        continue;
-      }
       if (route && chunk.kind === "stop" && chunk.usage?.model) {
         route.servedModel = chunk.usage.model;
+        $.ui.invalidate("ui.render");
       }
       yield chunk;
     }
@@ -185,10 +218,11 @@ export function register(on) {
     if (e.agentId !== undefined) return result;
     const route = routes.get(e.turnId);
     routes.delete(e.turnId);
+    if (route && current === route) current = null;
     if (!enabled || !footerEnabled || !route || e.reason !== "answer" || !e.answer) return result;
     const model = e.usage?.model;
-    if (typeof model !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(model) ||
-      typeof route.model !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(route.model) ||
+    if (typeof model !== "string" || !SAFE_MODEL.test(model) ||
+      typeof route.model !== "string" || !SAFE_MODEL.test(route.model) ||
       sameModel(model, route.model)) return result;
     const effort = route.requestedEffort;
     const label = typeof effort === "number" && Number.isFinite(effort) ? String(effort)

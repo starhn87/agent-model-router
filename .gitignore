@@ -6,3 +6,4 @@ dist/
 *.log
 *.jsonl
 .local/
+.claude/types/
