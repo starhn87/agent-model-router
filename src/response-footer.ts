@@ -13,6 +13,59 @@ export function responseFooter(model: unknown, effort?: string): string {
   return `\n\n— 모델: ${safeModel(model) ? model : "확인 불가"} · 요청 effort: ${effort && /^[a-z]+$/.test(effort) ? effort : "기본값"}`;
 }
 
+const FOOTER_START = "— 모델: ";
+const FOOTER_BOUNDARY = `\n\n${FOOTER_START}`;
+const FOOTER_END = /(?:^|\r?\n\r?\n)— 모델: (?:[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}|확인 불가) · 요청 effort: (?:[a-z]+|기본값)[ \t]*(?:\r?\n)*$/;
+
+export function stripResponseFooters(text: string): string {
+  for (;;) {
+    const stripped = text.replace(FOOTER_END, "");
+    if (stripped === text) return text;
+    text = stripped;
+  }
+}
+
+// A displayed router footer is transport metadata, not an example for the model
+// to imitate on its next turn. Only remove our exact trailer from assistant text.
+export function withoutResponseFooters(body: RecordValue): RecordValue {
+  if (!Array.isArray(body.input)) return body;
+  return { ...body, input: body.input.map((item: unknown) => {
+    if (!record(item) || item.role !== "assistant") return item;
+    if (typeof item.content === "string") return { ...item, content: stripResponseFooters(item.content) };
+    if (!Array.isArray(item.content)) return item;
+    return { ...item, content: item.content.map((part: unknown, index: number) =>
+      index === item.content.length - 1 && record(part) && ["text", "output_text"].includes(part.type) && typeof part.text === "string"
+        ? { ...part, text: stripResponseFooters(part.text) } : part) };
+  }) };
+}
+
+class FooterTail {
+  text = "";
+  private atStart = true;
+
+  push(delta: string): string {
+    const text = this.text + delta;
+    const marker = this.atStart && text.startsWith(FOOTER_START) ? 0 : text.indexOf(FOOTER_BOUNDARY);
+    let keep = marker >= 0 ? text.length - marker : 0;
+    if (marker < 0) {
+      for (let length = 1; length < FOOTER_BOUNDARY.length && length <= text.length; length++) {
+        if (FOOTER_BOUNDARY.startsWith(text.slice(-length))) keep = length;
+      }
+      if (this.atStart && FOOTER_START.startsWith(text)) keep = text.length;
+    }
+    this.text = text.slice(text.length - keep);
+    const visible = text.slice(0, text.length - keep);
+    if (visible) this.atStart = false;
+    return visible;
+  }
+
+  take(strip = false): string {
+    const text = strip ? stripResponseFooters(this.text) : this.text;
+    this.text = "";
+    return text;
+  }
+}
+
 function target(response: RecordValue): { item: RecordValue; part: RecordValue; outputIndex: number; contentIndex: number } | null {
   if (response.status !== "completed" || !Array.isArray(response.output)) return null;
   // Tool requests and commentary are intermediate steps, even when the API response completed.
@@ -38,7 +91,10 @@ export class ResponseFooter extends Transform {
   private pendingSize = 0;
   private bypass = false;
   private sequenceOffset = 0;
+  private lastSequence?: number;
   private hasToolCall = false;
+  private tails = new Map<string, { tail: FooterTail; event: RecordValue }>();
+  private commentary = new Set<number>();
   private format: "sse" | "json" | "unknown";
 
   constructor(contentType?: string, private readonly effort?: string) {
@@ -47,7 +103,7 @@ export class ResponseFooter extends Transform {
   }
 
   override _transform(chunk: Buffer, _encoding: BufferEncoding, callback: TransformCallback): void {
-    if (this.bypass) { this.push(chunk); callback(); return; }
+    if (this.bypass && this.format !== "sse") { this.push(chunk); callback(); return; }
     this.buffer = Buffer.concat([this.buffer, chunk]);
     if (this.format === "unknown") {
       const start = this.buffer.subarray(0, 64).toString("utf8").trimStart();
@@ -64,18 +120,52 @@ export class ResponseFooter extends Transform {
         this.frame(frame);
       }
     }
-    if (this.buffer.length + this.pendingSize > LIMIT) this.flushUnchanged();
+    const heldBytes = [...this.tails.values()].reduce((size, { tail }) => size + Buffer.byteLength(tail.text), 0);
+    if (this.buffer.length + this.pendingSize + heldBytes > LIMIT) this.flushUnchanged();
     callback();
   }
 
   private emitEvent(event: RecordValue): void {
     if (typeof event.sequence_number === "number") event.sequence_number += this.sequenceOffset;
+    if (typeof event.sequence_number === "number") this.lastSequence = event.sequence_number;
     this.push(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
   }
 
+  private textKey(event: RecordValue): string { return `${event.output_index}:${event.content_index}`; }
+
+  private emitFrame(raw: Buffer, event: RecordValue | null): void {
+    if (event?.type === "response.output_text.delta" && typeof event.delta === "string" && !this.commentary.has(event.output_index)) {
+      const key = this.textKey(event);
+      const state = this.tails.get(key) ?? { tail: new FooterTail(), event };
+      this.tails.set(key, state);
+      const delta = state.tail.push(event.delta);
+      if (delta !== event.delta) { this.emitEvent({ ...event, delta }); return; }
+    }
+    if (this.sequenceOffset && event) this.emitEvent(event);
+    else {
+      if (typeof event?.sequence_number === "number") this.lastSequence = event.sequence_number;
+      this.push(raw);
+    }
+  }
+
+  private releaseText(event: RecordValue, suffix?: string): void {
+    const key = this.textKey(event);
+    const held = this.tails.get(key)?.tail.take(suffix !== undefined) ?? "";
+    this.tails.delete(key);
+    const delta = held + (suffix ?? "");
+    if (!delta) return;
+    this.emitEvent({ type: "response.output_text.delta", item_id: event.item_id, output_index: event.output_index,
+      content_index: event.content_index, delta, ...(typeof event.sequence_number === "number" ? { sequence_number: event.sequence_number } : {}) });
+    this.sequenceOffset += 1;
+  }
+
   private frame(raw: Buffer): void {
-    if (this.bypass) { this.push(raw); return; }
     const event = parseFrame(raw);
+    if (this.bypass) {
+      if (this.sequenceOffset && event) this.emitEvent(event); else this.push(raw);
+      return;
+    }
+    if (record(event?.item) && event.item.phase === "commentary") this.commentary.add(event.output_index);
     if (record(event?.item) && /(?:call|call_output)$/.test(event.item.type ?? "")) this.hasToolCall = true;
     if (event?.type === "response.completed") {
       const response = event.response;
@@ -93,7 +183,8 @@ export class ResponseFooter extends Transform {
       }
       const done = selected && this.pending.find((frame) => {
         const part = parseFrame(frame);
-        return part?.type === "response.output_text.done" && part.output_index === selected.outputIndex && part.content_index === selected.contentIndex;
+        return part?.type === "response.output_text.done" && typeof part.text === "string" &&
+          part.output_index === selected.outputIndex && part.content_index === selected.contentIndex;
       });
       if (selected && done) {
         const suffix = responseFooter(response.model, this.effort);
@@ -101,24 +192,28 @@ export class ResponseFooter extends Transform {
           const part = parseFrame(frame);
           if (!part) { this.push(frame); continue; }
           const matches = part.output_index === selected.outputIndex;
-          if (matches && part.type === "response.output_text.done" && part.content_index === selected.contentIndex) {
-            this.emitEvent({ type: "response.output_text.delta", item_id: selected.item.id, output_index: selected.outputIndex,
-              content_index: selected.contentIndex, delta: suffix, ...(typeof part.sequence_number === "number" ? { sequence_number: part.sequence_number } : {}) });
-            this.sequenceOffset += 1;
-            part.text += suffix;
-          } else if (matches && part.type === "response.content_part.done" && part.content_index === selected.contentIndex && record(part.part)) {
-            part.part.text += suffix;
+          if (matches && part.type === "response.output_text.done" && part.content_index === selected.contentIndex && typeof part.text === "string") {
+            this.releaseText(part, suffix);
+            part.text = stripResponseFooters(part.text) + suffix;
+          } else if (matches && part.type === "response.content_part.done" && part.content_index === selected.contentIndex &&
+            record(part.part) && typeof part.part.text === "string") {
+            part.part.text = stripResponseFooters(part.part.text) + suffix;
           } else if (matches && part.type === "response.output_item.done" && record(part.item) && Array.isArray(part.item.content)) {
             const text = part.item.content[selected.contentIndex];
-            if (record(text) && typeof text.text === "string") text.text += suffix;
+            if (record(text) && typeof text.text === "string") text.text = stripResponseFooters(text.text) + suffix;
+          } else if (part.type === "response.output_text.done") {
+            this.releaseText(part);
+          } else if (part.type === "response.output_text.delta") {
+            this.emitFrame(frame, part);
+            continue;
           }
           this.emitEvent(part);
         }
-        selected.part.text += suffix;
+        selected.part.text = stripResponseFooters(selected.part.text) + suffix;
         this.emitEvent(event);
       } else {
-        for (const frame of this.pending) this.push(frame);
-        this.push(raw);
+        this.drainPending();
+        this.emitFrame(raw, event);
       }
       this.pending = []; this.pendingSize = 0;
       // Only one completed response per stream; preserve any transport trailers.
@@ -127,14 +222,39 @@ export class ResponseFooter extends Transform {
     }
     if (this.pending.length || event?.type === "response.output_text.done") {
       this.pending.push(raw); this.pendingSize += raw.length;
-      if (this.pendingSize > LIMIT) this.flushUnchanged();
-    } else this.push(raw);
+    } else if (event?.type === "error" || event?.type === "response.failed" || event?.type === "response.incomplete") {
+      this.releaseAll();
+      this.emitFrame(raw, event);
+    } else this.emitFrame(raw, event);
   }
 
-  private flushUnchanged(): void {
-    for (const frame of this.pending) this.push(frame);
-    this.push(this.buffer);
-    this.pending = []; this.pendingSize = 0; this.buffer = Buffer.alloc(0); this.bypass = true;
+  private drainPending(): void {
+    for (const frame of this.pending) {
+      const event = parseFrame(frame);
+      if (event?.type === "response.output_text.done") this.releaseText(event);
+      this.emitFrame(frame, event);
+    }
+    this.pending = []; this.pendingSize = 0;
+  }
+
+  private releaseAll(): void {
+    for (const { tail, event } of this.tails.values()) {
+      const delta = tail.take();
+      if (delta) {
+        this.emitEvent({ ...event, sequence_number: this.lastSequence === undefined ? undefined : this.lastSequence + 1 - this.sequenceOffset, delta });
+        this.sequenceOffset += 1;
+      }
+    }
+    this.tails.clear();
+  }
+
+  private flushUnchanged(ending = false): void {
+    this.drainPending();
+    this.releaseAll();
+    if (ending || this.format !== "sse" || this.buffer.length > LIMIT) {
+      this.push(this.buffer); this.buffer = Buffer.alloc(0);
+    }
+    this.pending = []; this.pendingSize = 0; this.bypass = true;
   }
 
   override _flush(callback: TransformCallback): void {
@@ -143,12 +263,12 @@ export class ResponseFooter extends Transform {
         const response = JSON.parse(this.buffer.toString("utf8"));
         const selected = record(response) ? target(response) : null;
         if (selected) {
-          selected.part.text += responseFooter(response.model, this.effort);
+          selected.part.text = stripResponseFooters(selected.part.text) + responseFooter(response.model, this.effort);
           this.buffer = Buffer.from(JSON.stringify(response));
         }
       } catch { /* Unknown responses are forwarded unchanged. */ }
     }
-    this.flushUnchanged(); callback();
+    this.flushUnchanged(true); callback();
   }
 }
 

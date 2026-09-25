@@ -7,7 +7,7 @@ import { codexSessionKey, estimateContextTokens, latestUserTurn, type CodexBody 
 import { CodexResponseObserver, type ObservedResponse } from "./codex-response.js";
 import { chooseModel, effortFromScore, fallbackModel, routingGuard } from "./policy.js";
 import { readRecentStatus, renderStatusPage } from "./status.js";
-import { allowsResponseFooter, ResponseFooter } from "./response-footer.js";
+import { allowsResponseFooter, ResponseFooter, withoutResponseFooters } from "./response-footer.js";
 import type { DecisionEvent, ResponseObservationEvent, RouteChoice, RouteQuery, RouteResult, RouterSettings } from "./types.js";
 
 const CHATGPT_CODEX_URL = "https://chatgpt.com/backend-api/codex";
@@ -252,7 +252,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       if (!isRecord(parsed)) throw new Error("body is not object");
       addFooter = router.shouldAddFooter(parsed);
       if (router.shouldRoute(parsed.model)) requestId = randomUUID();
-      const routed = await router.route(parsed, requestId);
+      const routed = await router.route(addFooter ? withoutResponseFooters(parsed) : parsed, requestId);
       if (requestId && typeof routed.model === "string") requestedModel = routed.model;
       if (requestId && isRecord(routed.reasoning) && typeof routed.reasoning.effort === "string") {
         requestedEffort = routed.reasoning.effort;

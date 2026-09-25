@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ResponseFooter, allowsResponseFooter, responseFooter } from "./response-footer.js";
+import { ResponseFooter, allowsResponseFooter, responseFooter, stripResponseFooters, withoutResponseFooters } from "./response-footer.js";
 
-function fixture(phase: string | undefined = "final_answer", tools = false, status = "completed") {
-  const part = { type: "output_text", text: "안녕하세요. 🍎", annotations: [] };
+function fixture(phase: string | undefined = "final_answer", tools = false, status = "completed", text = "안녕하세요. 🍎") {
+  const part = { type: "output_text", text, annotations: [] };
   const item = { type: "message", role: "assistant", id: "msg_1", status: "completed", phase, content: [part] };
   const events = [
     { type: "response.created", response: { model: "requested-model" } },
@@ -109,4 +109,89 @@ test("CRLF, missing final newline and oversized unknown data are preserved or ha
   const oversized = "x".repeat(4 * 1024 * 1024 + 1);
   assert.equal(await transform(oversized, undefined, oversized.length), oversized);
   assert.equal(responseFooter("<bad>", "<bad>"), "\n\n— 모델: 확인 불가 · 요청 effort: 기본값");
+});
+
+test("model-written and repeated footers are replaced with one authoritative footer in every SSE view", async () => {
+  const expected = `I have an apple.${responseFooter("served-model", "low")}`;
+  for (const emptyOutput of [true, false]) {
+    for (const suffix of [responseFooter("served-model", "low"), responseFooter("old-model", "xhigh"),
+      responseFooter("old-model", "high").repeat(2)]) {
+      const { events } = fixture("final_answer", false, "completed", `I have an apple.${suffix}`);
+      const input = events.map((event) => {
+        const e = JSON.parse(JSON.stringify(event));
+        if (emptyOutput && e.type === "response.completed") e.response.output = [];
+        return `event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`;
+      }).join("");
+      const once = await transform(input, undefined, 1);
+      for (const output of [once, await transform(once)]) {
+        const result = output.split("\n\n").filter(Boolean).map((frame) => JSON.parse(frame.split("\ndata: ")[1]!));
+        assert.equal(result.filter((e) => e.type === "response.output_text.delta").map((e) => e.delta).join(""), expected);
+        assert.equal(result.find((e) => e.type === "response.output_text.done").text, expected);
+        assert.equal(result.find((e) => e.type === "response.content_part.done").part.text, expected);
+        assert.equal(result.find((e) => e.type === "response.output_item.done").item.content[0].text, expected);
+        assert.deepEqual(result.map((e) => e.sequence_number), result.map((_, index) => index));
+        if (!emptyOutput) assert.equal(result.at(-1).response.output[0].content[0].text, expected);
+      }
+    }
+  }
+});
+
+test("footer detection spans separate delta events without delaying ordinary text", async () => {
+  const text = `Answer${responseFooter("stale-model", "high")}`;
+  const { events } = fixture("final_answer", false, "completed", text);
+  const expanded = events.flatMap<Record<string, unknown>>((event) => event.type === "response.output_text.delta"
+    ? [...text].map((delta) => ({ ...event, delta })) : [event]);
+  const input = expanded.map((e, sequence_number) => `event: ${e.type}\ndata: ${JSON.stringify({ ...e, sequence_number })}\n\n`).join("");
+  const output = await transform(input);
+  const result = output.split("\n\n").filter(Boolean).map((frame) => JSON.parse(frame.split("\ndata: ")[1]!));
+  assert.equal(result.filter((e) => e.type === "response.output_text.delta").map((e) => e.delta).join(""), `Answer${responseFooter("served-model", "low")}`);
+});
+
+test("footer examples inside an answer and incomplete responses retain their text", async () => {
+  for (const status of ["completed", "incomplete"]) {
+    const text = `Example:${responseFooter("example-model", "high")}\n\nThis line explains the example.`;
+    const input = fixture("final_answer", false, status, text).stream;
+    const output = await transform(input);
+    const result = output.split("\n\n").filter(Boolean).map((frame) => JSON.parse(frame.split("\ndata: ")[1]!));
+    const expected = text + (status === "completed" ? responseFooter("served-model", "low") : "");
+    assert.equal(result.filter((e) => e.type === "response.output_text.delta").map((e) => e.delta).join(""), expected);
+    assert.equal(result.find((e) => e.type === "response.output_text.done").text, expected);
+  }
+  const text = `Answer${responseFooter("model", "high")}`;
+  const output = await transform(fixture("final_answer", false, "incomplete", text).stream);
+  const result = output.split("\n\n").filter(Boolean).map((frame) => JSON.parse(frame.split("\ndata: ")[1]!));
+  assert.equal(result.filter((e) => e.type === "response.output_text.delta").map((e) => e.delta).join(""), text);
+});
+
+test("an error before text.done releases held text without claiming a completed footer", async () => {
+  const text = `Partial answer${responseFooter("unconfirmed-model", "high")}`;
+  const { events } = fixture("final_answer", false, "completed", text);
+  const partial = [...events.slice(0, 4), { type: "error", code: "synthetic_error", sequence_number: 4 }];
+  const output = await transform(partial.map((e) => `event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`).join(""));
+  const result = output.split("\n\n").filter(Boolean).map((frame) => JSON.parse(frame.split("\ndata: ")[1]!));
+  assert.equal(result.filter((e) => e.type === "response.output_text.delta").map((e) => e.delta).join(""), text);
+  assert.equal(result.at(-1).type, "error");
+  assert.deepEqual(result.map((e) => e.sequence_number), result.map((_, index) => index));
+});
+
+test("JSON footer normalization and history cleanup preserve users, tools and non-trailer examples", async () => {
+  const old = responseFooter("old-model", "high");
+  const response = fixture("final_answer", false, "completed", `Answer${old}${old}`).events.at(-1)!.response;
+  const output = JSON.parse(await transform(JSON.stringify(response), "application/json"));
+  assert.equal(output.output[0].content[0].text, `Answer${responseFooter("served-model", "low")}`);
+  const example = `Here is an example:${old}\n\nMore explanation.`;
+  const body = { input: [
+    { role: "assistant", content: `Answer${old}${old}` },
+    { role: "assistant", content: [{ type: "output_text", text: `Other answer${old}` }] },
+    { role: "assistant", content: example },
+    { role: "user", content: `Discuss this:${old}` },
+    { type: "function_call_output", output: old },
+  ] };
+  const cleaned = withoutResponseFooters(body);
+  assert.equal(cleaned.input[0].content, "Answer");
+  assert.equal(cleaned.input[1].content[0].text, "Other answer");
+  assert.equal(cleaned.input[2].content, example);
+  assert.deepEqual(cleaned.input.slice(3), body.input.slice(3));
+  assert.equal(body.input[0]!.content, `Answer${old}${old}`);
+  assert.equal(stripResponseFooters(`\`\`\`\n${old}\n\`\`\``), `\`\`\`\n${old}\n\`\`\``);
 });
