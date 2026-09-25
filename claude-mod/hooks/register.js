@@ -160,6 +160,14 @@ export function register(on) {
       ? { ...e, ...(route.model ? { model: route.model } : {}), ...(route.effort ? { effort: route.effort } : {}) } : e;
     if (route) route.requestedEffort = request.effort;
     for await (const chunk of next(request)) {
+      if (route && (route.model || route.effort) && footerEnabled && !route.announced && chunk.kind === "text" && chunk.text) {
+        route.announced = true;
+        const model = typeof request.model === "string" && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(request.model)
+          ? request.model : "확인 불가";
+        const effort = typeof request.effort === "string" && /^[a-z]+$/.test(request.effort) ? request.effort : "기본값";
+        yield { ...chunk, text: `> ✳️ 선택 모델: ${model} · 요청 effort: ${effort}\n\n---\n\n${chunk.text}` };
+        continue;
+      }
       if (route && chunk.kind === "stop" && chunk.usage?.model) {
         route.servedModel = chunk.usage.model;
       }

@@ -33,6 +33,8 @@ I have an apple.
 — 모델: gpt-6-luna · 요청 effort: low
 ```
 
+응답의 첫 텍스트 앞에는 `> ✳️ 선택 모델: gpt-6-luna · 요청 effort: low`가 먼저 표시됩니다. 이는 라우터가 요청한 경로이고, 끝의 `모델`은 API가 보고한 응답 모델입니다.
+
 응답 모델이 요청 모델과 다르면 끝에 `· 요청 모델: gpt-6-luna ≠`가 붙습니다. 로컬 `/status`에서는 Jev 추천 effort와 실제 요청 effort를 따로 볼 수 있고, Claude Code에서는 `/amr-route`로 확인할 수 있습니다. 요청 effort는 API에 전달한 값이며 실제 내부 추론량을 뜻하지 않습니다.
 
 ## 앱의 플러그인 목록과 설치는 어떻게 다른가요?

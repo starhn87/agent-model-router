@@ -16,6 +16,15 @@ export function responseFooter(model: unknown, effort?: string, requestedModel?:
   return `\n\n— 모델: ${safeModel(model) ? model : "확인 불가"} · 요청 effort: ${effort && /^[a-z]+$/.test(effort) ? effort : "기본값"}${mismatch}`;
 }
 
+export function responseRoute(model?: string, effort?: string): string {
+  return safeModel(model)
+    ? `> ✳️ 선택 모델: ${model} · 요청 effort: ${effort && /^[a-z]+$/.test(effort) ? effort : "기본값"}\n\n---\n\n`
+    : "";
+}
+
+const ROUTE_START = /^> ✳️ 선택 모델: [A-Za-z0-9][A-Za-z0-9._:/-]{0,127} · 요청 effort: (?:[a-z]+|기본값)\r?\n\r?\n---\r?\n\r?\n/;
+export function stripResponseRoute(text: string): string { return text.replace(ROUTE_START, ""); }
+
 const FOOTER_START = "— 모델: ";
 const FOOTER_BOUNDARY = `\n\n${FOOTER_START}`;
 const FOOTER_END = /(?:^|\r?\n\r?\n)— 모델: (?:[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}|확인 불가) · 요청 effort: (?:[a-z]+|기본값)(?: · 요청 모델: [A-Za-z0-9][A-Za-z0-9._:/-]{0,127} ≠)?[ \t]*(?:\r?\n)*$/;
@@ -34,11 +43,12 @@ export function withoutResponseFooters(body: RecordValue): RecordValue {
   if (!Array.isArray(body.input)) return body;
   return { ...body, input: body.input.map((item: unknown) => {
     if (!record(item) || item.role !== "assistant") return item;
-    if (typeof item.content === "string") return { ...item, content: stripResponseFooters(item.content) };
+    if (typeof item.content === "string") return { ...item, content: stripResponseFooters(stripResponseRoute(item.content)) };
     if (!Array.isArray(item.content)) return item;
     return { ...item, content: item.content.map((part: unknown, index: number) =>
-      index === item.content.length - 1 && record(part) && ["text", "output_text"].includes(part.type) && typeof part.text === "string"
-        ? { ...part, text: stripResponseFooters(part.text) } : part) };
+      record(part) && ["text", "output_text"].includes(part.type) && typeof part.text === "string"
+        ? { ...part, text: index === item.content.length - 1
+          ? stripResponseFooters(stripResponseRoute(part.text)) : stripResponseRoute(part.text) } : part) };
   }) };
 }
 
@@ -98,6 +108,9 @@ export class ResponseFooter extends Transform {
   private hasToolCall = false;
   private tails = new Map<string, { tail: FooterTail; event: RecordValue }>();
   private commentary = new Set<number>();
+  private finalItems = new Set<number>();
+  private prefixed = new Set<string>();
+  private announced = false;
   private format: "sse" | "json" | "unknown";
 
   constructor(contentType?: string, private readonly effort?: string, private readonly requestedModel?: string) {
@@ -136,13 +149,45 @@ export class ResponseFooter extends Transform {
 
   private textKey(event: RecordValue): string { return `${event.output_index}:${event.content_index}`; }
 
+  private decorateRoute(event: RecordValue): void {
+    const route = responseRoute(this.requestedModel, this.effort);
+    const text = (value: string, key: string) => this.prefixed.has(key) ? route + stripResponseRoute(value) : value;
+    if (event.type === "response.output_text.done" && typeof event.text === "string")
+      event.text = text(event.text, this.textKey(event));
+    if (event.type === "response.content_part.done" && record(event.part) && typeof event.part.text === "string")
+      event.part.text = text(event.part.text, this.textKey(event));
+    if (event.type === "response.output_item.done" && record(event.item) && Array.isArray(event.item.content)) {
+      for (let i = 0; i < event.item.content.length; i++) {
+        const part = event.item.content[i];
+        if (record(part) && typeof part.text === "string") part.text = text(part.text, `${event.output_index}:${i}`);
+      }
+    }
+  }
+
+  private decorateResponse(response: RecordValue): void {
+    if (!Array.isArray(response.output)) return;
+    const route = responseRoute(this.requestedModel, this.effort);
+    for (let outputIndex = 0; outputIndex < response.output.length; outputIndex++) {
+      const item = response.output[outputIndex];
+      if (!record(item) || !Array.isArray(item.content)) continue;
+      for (let contentIndex = 0; contentIndex < item.content.length; contentIndex++) {
+        const part = item.content[contentIndex];
+        if (record(part) && typeof part.text === "string" && this.prefixed.has(`${outputIndex}:${contentIndex}`))
+          part.text = route + stripResponseRoute(part.text);
+      }
+    }
+  }
+
   private emitFrame(raw: Buffer, event: RecordValue | null): void {
     if (event?.type === "response.output_text.delta" && typeof event.delta === "string" && !this.commentary.has(event.output_index)) {
       const key = this.textKey(event);
       const state = this.tails.get(key) ?? { tail: new FooterTail(), event };
       this.tails.set(key, state);
       const delta = state.tail.push(event.delta);
-      if (delta !== event.delta) { this.emitEvent({ ...event, delta }); return; }
+      const route = delta && this.finalItems.has(event.output_index) && !this.announced
+        ? responseRoute(this.requestedModel, this.effort) : "";
+      if (route) { this.prefixed.add(key); this.announced = true; }
+      if (route || delta !== event.delta) { this.emitEvent({ ...event, delta: route + delta }); return; }
     }
     if (this.sequenceOffset && event) this.emitEvent(event);
     else {
@@ -155,7 +200,9 @@ export class ResponseFooter extends Transform {
     const key = this.textKey(event);
     const held = this.tails.get(key)?.tail.take(suffix !== undefined) ?? "";
     this.tails.delete(key);
-    const delta = held + (suffix ?? "");
+    const route = suffix !== undefined && !this.announced ? responseRoute(this.requestedModel, this.effort) : "";
+    if (route) { this.prefixed.add(key); this.announced = true; }
+    const delta = route + held + (suffix ?? "");
     if (!delta) return;
     this.emitEvent({ type: "response.output_text.delta", item_id: event.item_id, output_index: event.output_index,
       content_index: event.content_index, delta, ...(typeof event.sequence_number === "number" ? { sequence_number: event.sequence_number } : {}) });
@@ -169,6 +216,9 @@ export class ResponseFooter extends Transform {
       return;
     }
     if (record(event?.item) && event.item.phase === "commentary") this.commentary.add(event.output_index);
+    if (event?.type === "response.output_item.added" && record(event.item) &&
+      event.item.type === "message" && event.item.role === "assistant" &&
+      (event.item.phase === undefined || event.item.phase === "final_answer")) this.finalItems.add(event.output_index);
     if (record(event?.item) && /(?:call|call_output)$/.test(event.item.type ?? "")) this.hasToolCall = true;
     if (event?.type === "response.completed") {
       const response = event.response;
@@ -191,32 +241,40 @@ export class ResponseFooter extends Transform {
       });
       if (selected && done) {
         const suffix = responseFooter(response.model, this.effort, this.requestedModel);
+        const selectedKey = `${selected.outputIndex}:${selected.contentIndex}`;
         for (const frame of this.pending) {
           const part = parseFrame(frame);
           if (!part) { this.push(frame); continue; }
           const matches = part.output_index === selected.outputIndex;
           if (matches && part.type === "response.output_text.done" && part.content_index === selected.contentIndex && typeof part.text === "string") {
             this.releaseText(part, suffix);
+            this.decorateRoute(part);
             part.text = stripResponseFooters(part.text) + suffix;
           } else if (matches && part.type === "response.content_part.done" && part.content_index === selected.contentIndex &&
             record(part.part) && typeof part.part.text === "string") {
+            this.decorateRoute(part);
             part.part.text = stripResponseFooters(part.part.text) + suffix;
           } else if (matches && part.type === "response.output_item.done" && record(part.item) && Array.isArray(part.item.content)) {
+            this.decorateRoute(part);
             const text = part.item.content[selected.contentIndex];
             if (record(text) && typeof text.text === "string") text.text = stripResponseFooters(text.text) + suffix;
           } else if (part.type === "response.output_text.done") {
             this.releaseText(part);
+            this.decorateRoute(part);
           } else if (part.type === "response.output_text.delta") {
             this.emitFrame(frame, part);
             continue;
-          }
+          } else this.decorateRoute(part);
           this.emitEvent(part);
         }
+        this.decorateResponse(response);
+        if (!this.prefixed.has(selectedKey)) selected.part.text = stripResponseRoute(selected.part.text);
         selected.part.text = stripResponseFooters(selected.part.text) + suffix;
         this.emitEvent(event);
       } else {
         this.drainPending();
-        this.emitFrame(raw, event);
+        if (record(response) && this.prefixed.size) { this.decorateResponse(response); this.emitEvent(event); }
+        else this.emitFrame(raw, event);
       }
       this.pending = []; this.pendingSize = 0;
       // Only one completed response per stream; preserve any transport trailers.
@@ -227,7 +285,9 @@ export class ResponseFooter extends Transform {
       this.pending.push(raw); this.pendingSize += raw.length;
     } else if (event?.type === "error" || event?.type === "response.failed" || event?.type === "response.incomplete") {
       this.releaseAll();
-      this.emitFrame(raw, event);
+      if (event?.type === "response.incomplete" && record(event.response) && this.prefixed.size) {
+        this.decorateResponse(event.response); this.emitEvent(event);
+      } else this.emitFrame(raw, event);
     } else this.emitFrame(raw, event);
   }
 
@@ -235,7 +295,13 @@ export class ResponseFooter extends Transform {
     for (const frame of this.pending) {
       const event = parseFrame(frame);
       if (event?.type === "response.output_text.done") this.releaseText(event);
-      this.emitFrame(frame, event);
+      if (event && this.prefixed.size && ["response.output_text.done", "response.content_part.done", "response.output_item.done"].includes(event.type)) {
+        this.decorateRoute(event);
+        this.emitEvent(event);
+      } else if (event?.type === "response.incomplete" && record(event.response) && this.prefixed.size) {
+        this.decorateResponse(event.response);
+        this.emitEvent(event);
+      } else this.emitFrame(frame, event);
     }
     this.pending = []; this.pendingSize = 0;
   }
@@ -266,6 +332,9 @@ export class ResponseFooter extends Transform {
         const response = JSON.parse(this.buffer.toString("utf8"));
         const selected = record(response) ? target(response) : null;
         if (selected) {
+          const first = selected.item.content.find((part: unknown) => record(part) && part.type === "output_text" && typeof part.text === "string" && part.text.length > 0);
+          if (record(first) && typeof first.text === "string")
+            first.text = responseRoute(this.requestedModel, this.effort) + stripResponseRoute(first.text);
           selected.part.text = stripResponseFooters(selected.part.text) + responseFooter(response.model, this.effort, this.requestedModel);
           this.buffer = Buffer.from(JSON.stringify(response));
         }

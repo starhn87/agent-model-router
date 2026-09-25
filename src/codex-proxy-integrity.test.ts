@@ -275,7 +275,7 @@ test("auto footer reports served model and effort and preserves observation meta
   assert.equal(response.headers.has("content-length"), false);
   assert.equal(response.headers.has("etag"), false);
   assert.match((await response.json() as any).output[0].content[0].text,
-    /Hello\n\n— 모델: gpt-6-sol · 요청 effort: low · 요청 모델: gpt-6-luna ≠$/);
+    /^> ✳️ 선택 모델: gpt-6-luna · 요청 effort: low\n\n---\n\nHello\n\n— 모델: gpt-6-sol · 요청 effort: low · 요청 모델: gpt-6-luna ≠$/);
   assert.equal(decisions[0]?.recommendedEffort, "low");
   assert.equal(observations[0]?.servedModel, "gpt-6-sol");
   assert.equal(observations[0]?.requestedModel, "gpt-6-luna");

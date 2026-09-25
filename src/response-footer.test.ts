@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ResponseFooter, allowsResponseFooter, responseFooter, stripResponseFooters, withoutResponseFooters } from "./response-footer.js";
+import { ResponseFooter, allowsResponseFooter, responseFooter, responseRoute, stripResponseFooters, withoutResponseFooters } from "./response-footer.js";
 
 function fixture(phase: string | undefined = "final_answer", tools = false, status = "completed", text = "안녕하세요. 🍎") {
   const part = { type: "output_text", text, annotations: [] };
@@ -20,8 +20,8 @@ function fixture(phase: string | undefined = "final_answer", tools = false, stat
   return { events, stream: events.map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join("") };
 }
 
-async function transform(text: string, contentType: string | undefined = "text/event-stream", split = 7): Promise<string> {
-  const stream = new ResponseFooter(contentType, "low");
+async function transform(text: string, contentType: string | undefined = "text/event-stream", split = 7, requestedModel?: string): Promise<string> {
+  const stream = new ResponseFooter(contentType, "low", requestedModel);
   const chunks: Buffer[] = [];
   stream.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
   const bytes = Buffer.from(text);
@@ -30,6 +30,77 @@ async function transform(text: string, contentType: string | undefined = "text/e
   await new Promise<void>((resolve, reject) => { stream.on("end", resolve); stream.on("error", reject); });
   return Buffer.concat(chunks).toString();
 }
+
+test("selected route appears before the first streamed answer and is removed from later input", async () => {
+  const input = fixture().stream;
+  const output = await transform(input, "text/event-stream", 1, "requested-model");
+  const events = output.split("\n\n").filter(Boolean).map((frame) => JSON.parse(frame.split("\ndata: ")[1]!));
+  const expected = responseRoute("requested-model", "low") + "안녕하세요. 🍎" + responseFooter("served-model", "low", "requested-model");
+  assert.equal(events.filter((e) => e.type === "response.output_text.delta").map((e) => e.delta).join(""), expected);
+  assert.equal(events.find((e) => e.type === "response.output_text.delta").delta.startsWith(responseRoute("requested-model", "low")), true);
+  assert.equal(events.find((e) => e.type === "response.output_text.done").text, expected);
+  assert.equal(events.find((e) => e.type === "response.content_part.done").part.text, expected);
+  assert.equal(events.find((e) => e.type === "response.output_item.done").item.content[0].text, expected);
+  assert.equal(events.at(-1).response.output[0].content[0].text, expected);
+  assert.equal(withoutResponseFooters({ input: [{ role: "assistant", content: expected }] }).input[0].content, "안녕하세요. 🍎");
+});
+
+test("route line is released with the first text delta before completion", () => {
+  const stream = new ResponseFooter("text/event-stream", "low", "requested-model");
+  let visible = "";
+  stream.on("data", (chunk) => { visible += chunk.toString(); });
+  for (const event of fixture().events.slice(0, 4))
+    stream.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+  assert.match(visible, /선택 모델: requested-model · 요청 effort: low/);
+  assert.doesNotMatch(visible, /모델: served-model/);
+  stream.destroy();
+});
+
+test("multiple text parts announce the route once and keep the settled footer last", async () => {
+  const { events } = fixture("final_answer", false, "completed", "First");
+  const second = { type: "output_text", text: "Second", annotations: [] };
+  const extra = [
+    { type: "response.content_part.added", output_index: 0, content_index: 1, item_id: "msg_1", part: { ...second, text: "" } },
+    { type: "response.output_text.delta", output_index: 0, content_index: 1, item_id: "msg_1", delta: "Second" },
+    { type: "response.output_text.done", output_index: 0, content_index: 1, item_id: "msg_1", text: "Second" },
+    { type: "response.content_part.done", output_index: 0, content_index: 1, item_id: "msg_1", part: second },
+  ];
+  const expanded = [...events.slice(0, 6), ...extra, ...events.slice(6)].map((event, sequence_number) => {
+    const value = JSON.parse(JSON.stringify({ ...event, sequence_number }));
+    if (value.type === "response.output_item.done") value.item.content.push(second);
+    if (value.type === "response.completed") value.response.output[0].content.push(second);
+    return value;
+  });
+  const input = expanded.map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join("");
+  const output = await transform(input, "text/event-stream", 5, "requested-model");
+  const result = output.split("\n\n").filter(Boolean).map((frame) => JSON.parse(frame.split("\ndata: ")[1]!));
+  const route = responseRoute("requested-model", "low");
+  const footer = responseFooter("served-model", "low", "requested-model");
+  const deltas = result.filter((event) => event.type === "response.output_text.delta");
+  assert.equal(deltas.filter((event) => event.content_index === 0).map((event) => event.delta).join(""), route + "First");
+  assert.equal(deltas.filter((event) => event.content_index === 1).map((event) => event.delta).join(""), "Second" + footer);
+  assert.equal(result.at(-1).response.output[0].content[0].text, route + "First");
+  assert.equal(result.at(-1).response.output[0].content[1].text, "Second" + footer);
+  const cleaned = withoutResponseFooters({ input: [{ role: "assistant", content: [
+    { type: "output_text", text: route + "First" }, { type: "output_text", text: "Second" + footer },
+  ] }] });
+  assert.deepEqual(cleaned.input[0].content, [
+    { type: "output_text", text: "First" }, { type: "output_text", text: "Second" },
+  ]);
+});
+
+test("tool and incomplete steps keep the route line without claiming a final model", async () => {
+  for (const [tools, status] of [[true, "completed"], [false, "incomplete"]] as const) {
+    const output = await transform(fixture("final_answer", tools, status, "Working").stream,
+      "text/event-stream", 7, "requested-model");
+    const events = output.split("\n\n").filter(Boolean).map((frame) => JSON.parse(frame.split("\ndata: ")[1]!));
+    const expected = responseRoute("requested-model", "low") + "Working";
+    assert.equal(events.filter((event) => event.type === "response.output_text.delta").map((event) => event.delta).join(""), expected);
+    assert.equal(events.find((event) => event.type === "response.output_text.done").text, expected);
+    assert.equal(events.at(-1).response.output[0].content[0].text, expected);
+    assert.doesNotMatch(expected, /— 모델:/);
+  }
+});
 
 test("final SSE streams original text immediately and appends served model consistently before done", async () => {
   const { stream: input } = fixture();

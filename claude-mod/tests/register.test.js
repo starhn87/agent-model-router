@@ -30,10 +30,11 @@ function harness({ answer = "fast", confidence = 0.95, effortScore = 2.8, env = 
     await hooks.get("session.start")($, {}, forward);
     await hooks.get("turn.start")($, { turnId, text }, forward);
   };
-  const step = async (turnId, agentId) => {
+  const step = async (turnId, agentId, text) => {
     let sent;
     const next = async function* (request) {
       sent = request;
+      if (text) yield { kind: "text", index: 0, text };
       yield { kind: "stop", usage: { model: request.model }, stopReason: "end_turn" };
     };
     const chunks = [];
@@ -86,6 +87,8 @@ test("skips sensitive prompts and leaves the session model on low confidence", a
   await sensitive.start("turn-1", "Please inspect the secret: abcdefghijklmnop");
   assert.equal(sensitive.requests.length, 0);
   assert.equal((await sensitive.step("turn-1")).sent.model, "claude-sonnet-5");
+  assert.equal((await sensitive.step("turn-1", undefined, "Kept the session model.")).chunks[0].text,
+    "Kept the session model.");
 
   const uncertain = harness({ confidence: 0.5 });
   await uncertain.start("turn-2", "Please implement this straightforward little change.");
@@ -113,6 +116,18 @@ test("completion displays actual model and requested effort once, without replac
   await h.step("t");
   assert.equal((await h.complete("t")).text, "모델: claude-served · 요청 effort: xhigh · 요청 모델: claude-haiku-4-5 ≠");
   assert.equal((await h.complete("t")).text, "Answer");
+});
+
+test("first main-loop text announces the selected route once", async () => {
+  const h = harness();
+  await h.start("t", "Fix the spelling of this short example sentence.");
+  const first = await h.step("t", undefined, "Corrected sentence.");
+  assert.equal(first.chunks[0].text,
+    "> ✳️ 선택 모델: claude-haiku-4-5 · 요청 effort: xhigh\n\n---\n\nCorrected sentence.");
+  const next = await h.step("t", undefined, "More text.");
+  assert.equal(next.chunks[0].text, "More text.");
+  const subagent = await h.step("t", "agent-1", "Tool result.");
+  assert.equal(subagent.chunks[0].text, "Tool result.");
 });
 
 test("matching and dated API model IDs do not show a mismatch", async () => {
