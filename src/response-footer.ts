@@ -38,6 +38,7 @@ export class ResponseFooter extends Transform {
   private pendingSize = 0;
   private bypass = false;
   private sequenceOffset = 0;
+  private hasToolCall = false;
   private format: "sse" | "json" | "unknown";
 
   constructor(contentType?: string, private readonly effort?: string) {
@@ -75,9 +76,21 @@ export class ResponseFooter extends Transform {
   private frame(raw: Buffer): void {
     if (this.bypass) { this.push(raw); return; }
     const event = parseFrame(raw);
+    if (record(event?.item) && /(?:call|call_output)$/.test(event.item.type ?? "")) this.hasToolCall = true;
     if (event?.type === "response.completed") {
       const response = event.response;
-      const selected = record(response) ? target(response) : null;
+      let selected = record(response) && !this.hasToolCall ? target(response) : null;
+      if (!selected && record(response) && !this.hasToolCall &&
+        (response.output === undefined || (Array.isArray(response.output) && response.output.length === 0))) {
+        // The ChatGPT Codex backend sends final items in output_item.done and an
+        // empty output array in response.completed. Keep the original wire index:
+        // reasoning items may already have passed through before text.done.
+        const items = this.pending.map(parseFrame).filter((part): part is RecordValue =>
+          part?.type === "response.output_item.done" && record(part.item) &&
+          Number.isSafeInteger(part.output_index) && part.output_index >= 0);
+        selected = target({ ...response, output: items.map((part) => part.item) });
+        if (selected) selected.outputIndex = items[selected.outputIndex]!.output_index;
+      }
       const done = selected && this.pending.find((frame) => {
         const part = parseFrame(frame);
         return part?.type === "response.output_text.done" && part.output_index === selected.outputIndex && part.content_index === selected.contentIndex;

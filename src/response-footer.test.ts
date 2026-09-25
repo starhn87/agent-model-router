@@ -51,6 +51,39 @@ test("final SSE streams original text immediately and appends served model consi
   stream.destroy();
 });
 
+test("Codex backend empty completion output uses the preceding final item and its actual index", async () => {
+  const { events } = fixture();
+  // Reasoning output already finished before the visible message at index 2.
+  const shifted = events.map((event) => {
+    const value = JSON.parse(JSON.stringify(event));
+    if (typeof value.output_index === "number") value.output_index += 2;
+    if (value.type === "response.completed") value.response.output = [];
+    return value;
+  });
+  const input = shifted.map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join("");
+  const output = await transform(input, undefined, 1);
+  const result = output.split("\n\n").filter(Boolean).map((frame) => JSON.parse(frame.split("\ndata: ")[1]!));
+  const expected = `안녕하세요. 🍎${responseFooter("served-model", "low")}`;
+  assert.equal(result.filter((e) => e.type === "response.output_text.delta").map((e) => e.delta).join(""), expected);
+  assert.equal(result.find((e) => e.type === "response.output_text.done").text, expected);
+  assert.equal(result.find((e) => e.type === "response.content_part.done").part.text, expected);
+  assert.equal(result.find((e) => e.type === "response.output_item.done").item.content[0].text, expected);
+  assert.equal(result.filter((e) => e.type === "response.output_text.delta").at(-1).output_index, 2);
+  assert.deepEqual(result.at(-1).response.output, []);
+  assert.deepEqual(result.map((e) => e.sequence_number), result.map((_, index) => index));
+});
+
+test("empty completion output still excludes commentary, incomplete responses and earlier tool calls", async () => {
+  for (const phase of ["commentary", "final_answer"]) {
+    const { events } = fixture(phase);
+    const copied = events.map((e) => JSON.parse(JSON.stringify(e)));
+    copied.at(-1).response.output = [];
+    if (phase === "final_answer") copied.unshift({ type: "response.output_item.added", output_index: 9, item: { type: "function_call" } });
+    const input = copied.map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join("");
+    assert.equal(await transform(input), input);
+  }
+});
+
 test("commentary, tools, errors and incomplete responses stay byte-for-byte unchanged", async () => {
   for (const sample of [fixture("commentary").stream, fixture(undefined, true).stream, fixture("final_answer", false, "incomplete").stream,
     'data: {bad json}\n\n', 'data: {"type":"error"}\n\n']) {
