@@ -115,30 +115,20 @@ test("maps a strong decision to Opus and can be disabled for a new session", asy
   assert.match(disabled.status(), /off/);
 });
 
-test("completion displays actual model and requested effort once, without replacing the answer", async () => {
+test("completion displays the route once beneath the answer, with the served model only on a mismatch", async () => {
   const h = harness();
   await h.start("t", "Fix the spelling of this short example sentence.");
   await h.step("t");
-  assert.equal((await h.complete("t")).text, "모델: claude-served · 요청 effort: xhigh · 요청 모델: claude-haiku-4-5 ≠");
+  assert.equal((await h.complete("t")).text, "Jev Auto · claude-haiku-4-5 · effort xhigh ≠ claude-served");
   assert.equal((await h.complete("t")).text, "Answer");
+  assert.ok(h.invalidated.includes("ui.render"));
 });
 
-test("reply text streams unchanged; the first reply block is drawn with the route once per turn", async () => {
+test("reply text streams unchanged", async () => {
   const h = harness();
   await h.start("t", "Fix the spelling of this short example sentence.");
-  const first = await h.step("t", undefined, "Corrected sentence.");
-  assert.equal(first.chunks[0].text, "Corrected sentence.");
+  assert.equal((await h.step("t", undefined, "Corrected sentence.")).chunks[0].text, "Corrected sentence.");
   assert.equal((await h.step("t", "agent-1", "Tool result.")).chunks[0].text, "Tool result.");
-  const banner = "> ✳️ Jev Auto · claude-haiku-4-5 · effort xhigh\n\n---\n\n";
-  const block = { text: "Corrected sentence.", isFirstOfReply: true };
-  assert.equal((await h.render("AssistantMessage", block, "m-1")).props.text, `${banner}Corrected sentence.`);
-  // A redraw of that block keeps its banner; later blocks and messages of the turn get none.
-  assert.equal((await h.render("AssistantMessage", block, "m-1")).props.text, `${banner}Corrected sentence.`);
-  assert.equal((await h.render("AssistantMessage", { text: "More.", isFirstOfReply: false }, "m-1")).props.text, "More.");
-  assert.equal((await h.render("AssistantMessage", { text: "Second.", isFirstOfReply: true }, "m-2")).props.text, "Second.");
-  await h.complete("t");
-  assert.equal((await h.render("AssistantMessage", { text: "Later.", isFirstOfReply: true }, "m-3")).props.text, "Later.");
-  assert.ok(h.invalidated.includes("ui.render"));
 });
 
 test("the prompt footer shows the requested model and effort, also on skipped turns", async () => {
@@ -166,7 +156,6 @@ test("drawing is left alone while routing or the footer is off", async () => {
     await h.start("t", "Fix the spelling of this short example sentence.");
     await h.step("t", undefined, "Text.");
     assert.deepEqual((await h.render("SessionMode", { modes: [] })).props.modes, []);
-    assert.equal((await h.render("AssistantMessage", { text: "Text.", isFirstOfReply: true })).props.text, "Text.");
   }
 });
 
@@ -176,14 +165,14 @@ test("matching and dated API model IDs do not show a mismatch; longer version nu
     await h.start("t", "Fix the spelling of this short example sentence.");
     await h.step("t", undefined, undefined, model);
     assert.ok(h.status().endsWith(`API served ${model}.`), h.status());
-    assert.equal((await h.complete("t", { usage: { model } })).text, "Answer");
+    assert.equal((await h.complete("t", { usage: { model } })).text, "Jev Auto · claude-haiku-4-5 · effort xhigh");
   }
   const h = harness();
   await h.start("t", "Fix the spelling of this short example sentence.");
   await h.step("t", undefined, undefined, "claude-haiku-4-5-5");
   assert.ok(h.status().endsWith("API served claude-haiku-4-5-5 ≠ claude-haiku-4-5."), h.status());
   assert.equal((await h.complete("t", { usage: { model: "claude-haiku-4-5-5" } })).text,
-    "모델: claude-haiku-4-5-5 · 요청 effort: xhigh · 요청 모델: claude-haiku-4-5 ≠");
+    "Jev Auto · claude-haiku-4-5 · effort xhigh ≠ claude-haiku-4-5-5");
 });
 
 test("completion leaves subagents, interruptions, disabled routing and footer opt-out alone", async () => {
@@ -206,5 +195,5 @@ test("missing served model does not claim a mismatch", async () => {
   await h.start("t", "Hi");
   await h.step("t");
   assert.equal((await h.complete("t", { usage: undefined }, "Other plugin synopsis")).text,
-    "Other plugin synopsis");
+    "Other plugin synopsis\n\nJev Auto · claude-sonnet-5 · effort medium");
 });

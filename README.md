@@ -33,7 +33,7 @@ node dist/cli.js compare fixtures/comparison-example.json
 ```
 
 Codex 앱을 재시작하고 새 작업에서 `Jev Auto`를 선택하세요. Claude Code는 새 세션을 시작하세요.
-Codex는 응답 시작에 선택 모델·요청 effort를 표시합니다. Claude Code는 프롬프트 하단 모드 라벨(`Jev Auto · 모델 · effort`)과 답변 첫 블록의 배너를 화면에만 그리며 대화 기록에는 남기지 않습니다. 실제 모델이 다를 때만 응답 끝에 알립니다.
+Codex는 응답 시작에 선택 모델·요청 effort를 표시합니다. Claude Code는 턴이 끝나면 답변 아래 알림 줄에 `Jev Auto · 모델 · effort`를 표시하고(터미널에서는 프롬프트 하단 모드 라벨에도), 대화 기록에는 남기지 않습니다. 실제 모델이 다를 때는 `≠ 실제 모델`을 덧붙입니다.
 설치 시 검색·기억 스킬도 연결됩니다. 후보가 5개를 넘고 에이전트가 스킬을 호출하면 Jev의 구조화된 응답으로 후보를 선별하고 `.local/search.jsonl` 또는 `.local/memory.jsonl`에 건수·시간 등을 기록합니다. 매 대화마다 자동 실행되거나 내장 검색·기억 도구를 가로채지는 않습니다.
 
 한 앱만 설정하려면 다음을 사용하세요:

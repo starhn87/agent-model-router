@@ -131,11 +131,13 @@ function statusOf(enabled, last) {
 
 const SAFE_MODEL = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
 
-// What the prompt footer and the first reply block show for a turn: the model and
-// effort the plugin actually requested, and the served model only when it differs.
+// What the prompt footer and the turn's closing notice show: the model and effort the
+// plugin actually requested, and the served model only when it differs.
 function routeLabel(route, { served = false } = {}) {
   const model = typeof route.requestedModel === "string" && SAFE_MODEL.test(route.requestedModel) ? route.requestedModel : "확인 불가";
-  const effort = typeof route.requestedEffort === "string" && /^[a-z]+$/.test(route.requestedEffort) ? route.requestedEffort : "기본값";
+  const requested = route.requestedEffort;
+  const effort = typeof requested === "number" && Number.isFinite(requested) ? String(requested)
+    : typeof requested === "string" && /^[a-z]+$/.test(requested) ? requested : "기본값";
   const mismatch = served && typeof route.servedModel === "string" && SAFE_MODEL.test(route.servedModel) &&
     model !== "확인 불가" && !sameModel(route.servedModel, model) ? ` ≠ ${route.servedModel}` : "";
   return `Jev Auto · ${model} · effort ${effort}${mismatch}`;
@@ -143,31 +145,16 @@ function routeLabel(route, { served = false } = {}) {
 
 export function register(on) {
   const routes = new Map();
-  const announced = new Map();
   let enabled = false;
   let footerEnabled = true;
   let last = null;
-  let current = null;
 
-  // Drawn only: the footer mode label and the reply banner never enter the transcript,
-  // so the model cannot imitate them on a later turn.
+  // Drawn only: the prompt footer's mode label never enters the transcript, so the
+  // model cannot imitate it on a later turn. (Terminal and desktop surfaces.)
   on("ui.render", { component: "SessionMode" }, ($, e, next) => {
     if (!enabled || !footerEnabled) return next(e);
     const label = last?.requestedModel ? routeLabel(last, { served: true }) : "Jev Auto";
     return next({ ...e, props: { ...e.props, modes: [...e.props.modes, label] } });
-  });
-
-  on("ui.render", { component: "AssistantMessage" }, ($, e, next) => {
-    if (!enabled || !footerEnabled || !e.props.isFirstOfReply) return next(e);
-    let label = announced.get(e.requestId);
-    if (label === undefined && current?.requestedModel && !current.announcedMessage) {
-      current.announcedMessage = e.requestId;
-      label = routeLabel(current);
-      announced.set(e.requestId, label);
-      while (announced.size > MAX_CACHED_TURNS) announced.delete(announced.keys().next().value);
-    }
-    if (label === undefined) return next(e);
-    return next({ ...e, props: { ...e.props, text: `> ✳️ ${label}\n\n---\n\n${e.props.text}` } });
   });
 
   on("session.start", async ($, e, next) => {
@@ -189,7 +176,6 @@ export function register(on) {
       }
       routes.set(e.turnId, route);
       last = route;
-      current = route;
       while (routes.size > MAX_CACHED_TURNS) routes.delete(routes.keys().next().value);
     }
     return next(e);
@@ -218,17 +204,11 @@ export function register(on) {
     if (e.agentId !== undefined) return result;
     const route = routes.get(e.turnId);
     routes.delete(e.turnId);
-    if (route && current === route) current = null;
     if (!enabled || !footerEnabled || !route || e.reason !== "answer" || !e.answer) return result;
-    const model = e.usage?.model;
-    if (typeof model !== "string" || !SAFE_MODEL.test(model) ||
-      typeof route.model !== "string" || !SAFE_MODEL.test(route.model) ||
-      sameModel(model, route.model)) return result;
-    const effort = route.requestedEffort;
-    const label = typeof effort === "number" && Number.isFinite(effort) ? String(effort)
-      : typeof effort === "string" && /^[a-z]+$/.test(effort) ? effort : "기본값";
-    // turn.complete displays a synopsis beneath the answer without rewriting its transcript.
-    const footer = `모델: ${model} · 요청 effort: ${label} · 요청 모델: ${route.model} ≠`;
+    if (typeof e.usage?.model === "string") route.servedModel = e.usage.model;
+    // turn.complete displays a synopsis beneath the answer without rewriting its transcript:
+    // the one channel every surface shows (a stream-json host gets it as a system notice).
+    const footer = routeLabel(route, { served: true });
     return { ...result, text: result.text && result.text !== e.answer ? `${result.text}\n\n${footer}` : footer };
   });
 }
