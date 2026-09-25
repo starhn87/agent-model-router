@@ -7,7 +7,7 @@ Codex와 Claude Code에서 턴별 모델 선택을 시험하는 로컬 프로젝
 | 대상 | 현재 구현 | 실제 검증 |
 | --- | --- | --- |
 | Codex CLI | 기존 ChatGPT 로그인으로 로컬 프록시를 거쳐 `pass`·`force`·`shadow`·`auto` 실행 | 실제 Jev로 같은 대화의 `fast → balanced` 전환과 도구 사용 완료. 사용자 설정과 상시 로컬 서버를 연결한 공개 합성 CLI 턴에서도 `fast → gpt-6-luna` 전환 확인 |
-| Codex 데스크톱 | 동일 프록시와 사용자 수준 설정 제공 | 이전 제한 시험에서 앱의 `shadow` 추천과 `auto`의 `gpt-6-luna` 응답 완료 확인. 현재 사용자 설정을 상시 서버에 연결했으며 실행 중인 앱에는 재시작 후 반영됨 |
+| Codex 데스크톱 | 동일 프록시와 사용자 수준 설정 제공 | 이전 제한 시험에서 앱의 `shadow` 추천과 `auto` 응답 완료 확인. 사용자 설정과 상시 로컬 서버를 연결하고 앱을 재시작한 뒤, 새 공개 합성 작업에서 Jev `fast` 추천에 따라 `gpt-6-luna`로 실제 응답한 것을 확인 |
 | Claude Code CLI·데스크톱 Code 탭 | 초기 접근 기능인 함수 훅 플러그인으로 주 턴의 모델 요청을 전환. 기존 `UserPromptSubmit` 관찰 훅도 선택 가능 | 사용자 범위 플러그인 설치 후 새 CLI·데스크톱 Code 세션의 공개 합성 턴에서 실제 `claude-haiku-4-5` 응답 확인 |
 
 Claude 구독 세션을 가로채는 프록시는 만들지 않았습니다. Claude Code 내부의 [초기 접근 함수 훅](https://github.com/anthropics/claude-code/blob/main/mods/README.md)을 사용하므로 설치된 Claude Code 버전에 따라 동작이 바뀔 수 있습니다. Claude의 별도 API 게이트웨이는 구독 외 과금과 자격 증명이 필요하므로 이 프로젝트에서 자동 활성화하지 않습니다.
