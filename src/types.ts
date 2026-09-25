@@ -34,6 +34,8 @@ export type RouterSettings = {
   minimumConfidence: number;
   autoEffort: boolean;
   minimumDowngradeConfidence?: number;
+  // Per-tier confidence to evaluate in the log only; the applied route is unchanged.
+  shadowConfidence?: Partial<Record<Tier, number>>;
 };
 
 export type DecisionEvent = {
@@ -51,6 +53,9 @@ export type DecisionEvent = {
   requestId?: string;
   taskId?: string;
   reason: string;
+  // What the route would have been under settings.shadowConfidence, when it differs.
+  shadowModel?: string;
+  shadowEffort?: string;
 };
 
 export type ResponseObservationEvent = {

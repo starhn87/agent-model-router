@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { askJev } from "./jev.js";
 import { codexSessionKey, estimateContextTokens, latestUserTurn, type CodexBody } from "./codex-request.js";
 import { CodexResponseObserver, type ObservedResponse } from "./codex-response.js";
-import { chooseModel, effortFromScore, fallbackModel, localRoute } from "./policy.js";
+import { chooseModel, effortFromScore, fallbackModel, localRoute, shadowRoute } from "./policy.js";
 import { readRecentStatus, renderStatusPage } from "./status.js";
 import { allowsResponseFooter, ResponseFooter, withoutResponseFooters } from "./response-footer.js";
 import type { DecisionEvent, ResponseObservationEvent, RouteChoice, RouteQuery, RouteResult, RouterSettings } from "./types.js";
@@ -179,11 +179,13 @@ export class CodexRouter {
           const choice = await this.classify(query);
           result = chooseModel(query, choice, settings, this.allowedModels());
           if (settings.autoEffort) selectedEffort = result.effort;
+          const shadow = shadowRoute(query, choice, result, settings, this.allowedModels());
           this.report({ result: result.model === currentModel ? "kept" : "routed", model: result.model,
             effort: this.effectiveEffort(result.model, selectedEffort),
             recommendedEffort: effortFromScore(choice.effortScore), recommendedTier: result.tier,
             confidence: result.confidence, latencyMs: Date.now() - started,
-            jevInputTokens: choice.inputTokens, reason: result.reason }, requestId);
+            jevInputTokens: choice.inputTokens, reason: result.reason,
+            ...(shadow ? { shadowModel: shadow.model, ...(shadow.effort ? { shadowEffort: this.effectiveEffort(shadow.model, shadow.effort) } : {}) } : {}) }, requestId);
         } catch {
           result = { model: fallbackModel(currentModel, settings, this.allowedModels()), reason: "jev-unavailable" };
           if (settings.autoEffort) selectedEffort = "medium";

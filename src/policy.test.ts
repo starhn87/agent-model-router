@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { chooseModel, defaultSettings, localRoute, routingGuard } from "./policy.js";
+import { chooseModel, defaultSettings, localRoute, routingGuard, shadowRoute } from "./policy.js";
 
 const settings = defaultSettings("auto");
 const query = { prompt: "이 함수의 타입 오류를 수정해줘", currentModel: "gpt-6-sol", contextTokens: 2000 };
@@ -80,4 +80,18 @@ test("fallback respects catalog availability and tier effort defaults", () => {
   assert.equal(chooseModel(query, { tier: "fast", confidence: 0.95 }, settings).effort, "low");
   assert.equal(chooseModel(query, { tier: "balanced", confidence: 0.95, effortScore: 4, effortConfidence: 0.2 }, settings).effort, "medium");
   assert.equal(chooseModel(query, { tier: "strong", confidence: 0.95, effortScore: 3, effortConfidence: 0.99 }, settings).effort, "xhigh");
+});
+
+test("a shadow fast confidence reports the route it would take without changing the applied one", () => {
+  const shadowed = { ...settings, minimumDowngradeConfidence: 0.9, shadowConfidence: { fast: 0.7 } };
+  const lowFast = { tier: "fast" as const, confidence: 0.75, effortScore: 0 };
+  const applied = chooseModel(query, lowFast, shadowed);
+  assert.equal(applied.model, "gpt-6-sol");
+  assert.equal(shadowRoute(query, lowFast, applied, shadowed)?.model, "gpt-6-luna");
+  const downgrade = { tier: "fast" as const, confidence: 0.86 };
+  assert.equal(shadowRoute(query, downgrade, chooseModel(query, downgrade, shadowed), shadowed)?.model, "gpt-6-luna");
+  const tooLow = { tier: "fast" as const, confidence: 0.6 };
+  assert.equal(shadowRoute(query, tooLow, chooseModel(query, tooLow, shadowed), shadowed), null);
+  const balanced = { tier: "balanced" as const, confidence: 0.75 };
+  assert.equal(shadowRoute(query, balanced, chooseModel(query, balanced, shadowed), shadowed), null);
 });

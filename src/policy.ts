@@ -83,6 +83,18 @@ export function localRoute(query: RouteQuery, settings: RouterSettings, allowedM
   return { model: settings.models.fast, effort: "low", tier: "fast", confidence: 1, reason: "simple-turn" };
 }
 
+// The route a lower tier confidence would have chosen, or null when it matches the applied one.
+export function shadowRoute(query: RouteQuery, choice: RouteChoice, applied: RouteResult, settings: RouterSettings,
+  allowedModels?: ReadonlySet<string>): RouteResult | null {
+  const threshold = settings.shadowConfidence?.[choice.tier];
+  if (threshold === undefined || (applied.reason !== "low-confidence" && applied.reason !== "downgrade-fallback")) return null;
+  const alternative = chooseModel(query, choice, { ...settings, shadowConfidence: undefined,
+    minimumConfidence: Math.min(settings.minimumConfidence, threshold),
+    ...(settings.minimumDowngradeConfidence === undefined ? {} : { minimumDowngradeConfidence: Math.min(settings.minimumDowngradeConfidence, threshold) }),
+  }, allowedModels);
+  return alternative.model === applied.model ? null : alternative;
+}
+
 export function chooseModel(
   query: RouteQuery,
   choice: RouteChoice | null,

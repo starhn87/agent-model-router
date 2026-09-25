@@ -350,3 +350,14 @@ test("local routes do not mutate pass or shadow requests, and force still wins",
     }
   }
 });
+
+test("auto mode logs the shadow fast route while sending the balanced model", async () => {
+  const events: DecisionEvent[] = [];
+  const router = new CodexRouter({ settings: { ...defaultSettings("auto"), shadowConfidence: { fast: 0.7 } },
+    classify: async () => ({ tier: "fast", confidence: 0.75, effortScore: 0 }), onDecision: (event) => events.push(event) });
+  router.ingestCatalog(catalog);
+  assert.equal((await router.route(userBody())).model, "gpt-6-sol");
+  assert.equal(events[0]!.reason, "low-confidence");
+  assert.equal(events[0]!.shadowModel, "gpt-6-luna");
+  assert.equal(events[0]!.shadowEffort, "medium");
+});

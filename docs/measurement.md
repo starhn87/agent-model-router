@@ -9,6 +9,18 @@ node dist/cli.js report .local/codex-persistent.jsonl
 
 `p50/p95RequestDurationMs`는 프록시가 요청을 받기 시작한 때부터 완료 메타데이터를 관찰할 때까지의 시간입니다. `p50/p95ObservedSpanMs`는 첫 판정 기록부터 마지막으로 관찰한 완료 응답까지의 간격으로, 실제 작업 완료 시간의 **하한**입니다. 작업 사이의 중단, 사용자의 확인 시간, 품질과 재시도 여부는 측정하지 않습니다. `estimatedJevUsd`는 Jev 입력 비용만이며 에이전트 모델의 청구 비용이 아닙니다.
 
+## 기간 필터
+
+`--since`에 날짜나 ISO 시각을 주면 그 이후 기록만 요약합니다. 정책을 바꾼 뒤의 결과만 보려면 변경 시각을 지정하세요.
+
+```bash
+node dist/cli.js report .local/codex-persistent.jsonl --since 2026-09-25T20:49:00+09:00
+```
+
+## fast 신뢰도 기준 shadow 실험
+
+`serve`·`codex`에 `--shadow-fast-confidence 0.7`을 주면 Jev가 fast를 추천했지만 신뢰도 기준(또는 `--downgrade-confidence` 하향 기준)에 못 미친 턴에서, 기준이 0.7이었다면 선택됐을 모델을 판정 기록의 `shadowModel`·`shadowEffort`에 남깁니다. **실제 요청 모델은 바꾸지 않습니다.** 자동 설치는 이 옵션을 켭니다. `report`의 `shadow`는 해당 판정·작업·응답 수와, `--prices`가 있으면 같은 토큰을 실제 모델과 shadow 모델 단가로 계산한 `appliedUsd`·`shadowUsd`를 보여줍니다. shadow 모델이 같은 품질로 같은 토큰을 썼을 거라는 가정의 추정치이므로, 기준을 실제로 낮추기 전에 해당 작업 일부를 fast 모델로 다시 실행해 `compare-draft`와 품질 점수로 확인하세요.
+
 ## 에이전트 모델 비용 추정
 
 `--prices`에 모델별 100만 토큰당 단가 파일을 주면 `agentCost`에 실제 응답 모델별 추정 비용과, 같은 토큰을 `referenceModel` 단가로 계산한 값 및 차이를 표시합니다. 단가는 이 프로젝트가 제공하지 않으므로 계정의 실제 요금으로 직접 채우세요. 예제 파일의 숫자는 합성값입니다. 기준 모델이 실제로 같은 토큰을 썼을 거라는 가정이므로 `estimatedSavingsUsd`는 추정치이며 청구 비용 비교를 대신하지 않습니다. 단가가 없는 모델의 응답은 `unpricedResponses`로 따로 셉니다. 날짜가 붙은 스냅샷(`…-20251001`)은 기본 모델 단가를 사용합니다.

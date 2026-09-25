@@ -75,3 +75,20 @@ test("a high Jev error rate is reported as a warning once enough calls were atte
   assert.equal(summary.warnings.length, 1);
   assert.deepEqual(summarizeMetrics([line("error"), line("routed")].join("\n")).warnings, []);
 });
+
+test("--since drops older events and shadow routes are priced on the same task's tokens", () => {
+  const prices = { schemaVersion: 1 as const, models: {
+    sol: { inputUsdPerMillion: 10, cachedInputUsdPerMillion: 10, outputUsdPerMillion: 0 },
+    luna: { inputUsdPerMillion: 1, cachedInputUsdPerMillion: 1, outputUsdPerMillion: 0 } } };
+  const input = [
+    { at: "2026-09-25T01:00:00Z", client: "codex", result: "kept", model: "sol", reason: "old", latencyMs: 1 },
+    { at: "2026-09-25T02:00:00Z", client: "codex", result: "kept", model: "sol", taskId: "t", reason: "low-confidence", latencyMs: 1, shadowModel: "luna" },
+    { at: "2026-09-25T02:00:01Z", client: "codex", kind: "response", taskId: "t", requestId: "a", requestedModel: "sol", servedModel: "sol", inputTokens: 1_000_000 },
+    { at: "2026-09-25T02:00:02Z", client: "codex", kind: "response", taskId: "t", requestId: "b", requestedModel: "sol", servedModel: "sol", inputTokens: 1_000_000 },
+  ].map((event) => JSON.stringify(event)).join("\n");
+  const summary = summarizeMetrics(input, undefined, prices, Date.parse("2026-09-25T01:30:00Z"));
+  assert.equal(summary.total, 1);
+  assert.deepEqual(summary.shadow, { decisions: 1, byModel: { luna: 1 }, tasks: 1, responses: 2, appliedUsd: 20, shadowUsd: 2 });
+  assert.equal(summarizeMetrics(input).total, 2);
+  assert.equal(summarizeMetrics(input).shadow.appliedUsd, null);
+});

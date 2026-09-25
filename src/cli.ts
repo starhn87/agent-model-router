@@ -57,6 +57,11 @@ function parseOptions(args: string[]): Parsed {
       if (!Number.isFinite(confidence) || confidence <= 0 || confidence > 1) throw new Error(`invalid downgrade confidence: ${value}`);
       settings.minimumDowngradeConfidence = confidence;
     }
+    else if (flag === "--shadow-fast-confidence") {
+      const confidence = Number(value);
+      if (!Number.isFinite(confidence) || confidence <= 0 || confidence > 1) throw new Error(`invalid shadow confidence: ${value}`);
+      settings.shadowConfidence = { ...settings.shadowConfidence, fast: confidence };
+    }
     else if (flag === "--keychain-service") keychainService = value;
     else if (flag === "--keychain-account") keychainAccount = value;
     else if (flag === "--port") {
@@ -174,7 +179,7 @@ function help(): void {
     `  jao codex [router options] -- [codex arguments]\n` +
     `  jao serve [router options]  (for Codex desktop; default port 8765; /status with --metrics)\n` +
     `  jao claude-shadow-hook --metrics FILE [--keychain-service NAME --keychain-account USER]\n` +
-    `  jao report FILE [--prices PRICES.json]  (agent cost and savings estimate from your price table)\n\n` +
+    `  jao report FILE [--prices PRICES.json] [--since ISO-TIME]  (agent cost and savings estimate from your price table)\n\n` +
     `  jao compare FILE  (paired fixed and auto results; no model calls)\n` +
     `  jao compare-draft FIXED.jsonl AUTO.jsonl [--prices FILE]  (prefill compare input from two metrics logs)\n` +
     `  jao search FILE|- [--metrics FILE]  (search-result decision; up to two paid Jev calls)\n` +
@@ -185,7 +190,8 @@ function help(): void {
     `  jao memory-evaluate FILE  (human-labelled needed-passage recall)\n` +
     `Router options: --mode pass|force|shadow|auto, --force-model ID,\n` +
     `  --baseline-model ID, --fast-model ID, --balanced-model ID,\n` +
-    `  --strong-model ID, --downgrade-confidence 0..1, --metrics FILE, --port PORT,\n` +
+    `  --strong-model ID, --downgrade-confidence 0..1, --shadow-fast-confidence 0..1 (log only),\n` +
+    `  --metrics FILE, --port PORT,\n` +
     `  --keychain-service NAME, --keychain-account USER, --response-footer on|off\n`);
 }
 
@@ -203,10 +209,17 @@ async function main(): Promise<void> {
     return;
   }
   if (command === "report") {
-    if (!args[0] || !(args.length === 1 || (args.length === 3 && args[1] === "--prices" && args[2]))) {
-      throw new Error("usage: jao report FILE [--prices PRICES.json]");
+    const usage = "usage: jao report FILE [--prices PRICES.json] [--since ISO-TIME]";
+    const options = new Map<string, string>();
+    for (let index = 1; index < args.length; index += 2) {
+      const flag = args[index], value = args[index + 1];
+      if (!flag || !["--prices", "--since"].includes(flag) || !value || options.has(flag)) throw new Error(usage);
+      options.set(flag, value);
     }
-    const summary = readMetricsFile(args[0], args[2] ? readPriceTable(args[2]) : undefined);
+    if (!args[0]) throw new Error(usage);
+    const since = options.has("--since") ? Date.parse(options.get("--since")!) : undefined;
+    if (since !== undefined && !Number.isFinite(since)) throw new Error("--since must be a date or ISO time, e.g. 2026-09-25T20:49:00+09:00");
+    const summary = readMetricsFile(args[0], options.has("--prices") ? readPriceTable(options.get("--prices")!) : undefined, since);
     for (const warning of summary.warnings) process.stderr.write(`[jao] warning: ${warning}\n`);
     process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
     return;

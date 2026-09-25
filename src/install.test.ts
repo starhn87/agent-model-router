@@ -163,6 +163,7 @@ test("both install runs service before redirecting Codex, and disable preserves 
   assert.match(h.get(".codex/config.toml"), /model_provider = "agent_router"/);
   assert.ok(lstatSync(join(h.context.home, ".agents/skills/agent-context-gates")).isSymbolicLink());
   assert.match(servicePlist(h.context), /repo space &amp; test/);
+  assert.match(servicePlist(h.context), /<string>--shadow-fast-confidence<\/string><string>0.7<\/string>/);
   assert.match(await doctor(h.context), /연결됨/);
   mkdirSync(join(h.context.repo, ".local"), { recursive: true });
   writeFileSync(join(h.context.repo, ".local/claude.jsonl"), [...Array(8).fill('{"client":"claude","result":"error","reason":"x"}'),

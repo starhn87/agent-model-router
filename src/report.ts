@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { agentCost, type AgentCost, type PriceTable, type TokenUsage } from "./pricing.js";
+import { agentCost, priceFor, usageUsd, type AgentCost, type PriceTable, type TokenUsage } from "./pricing.js";
 import type { MetricsEvent, Tier } from "./types.js";
 
 // Below this many Jev attempts an error rate is too noisy to warn about.
@@ -21,6 +21,16 @@ export type MetricsSummary = {
   jevErrorRate: number | null;
   warnings: string[];
   agentCost?: AgentCost;
+  // Turns a shadow confidence would have routed differently. Priced with the same
+  // observed tokens, so the delta is an estimate; quality under the shadow model is unknown.
+  shadow: {
+    decisions: number;
+    byModel: Record<string, number>;
+    tasks: number;
+    responses: number;
+    appliedUsd: number | null;
+    shadowUsd: number | null;
+  };
   observedResponses: number;
   differentModelIds: number;
   observedInputTokens: number;
@@ -48,11 +58,23 @@ function percentile(values: number[], fraction: number): number | null {
   return values[Math.ceil(values.length * fraction) - 1] ?? null;
 }
 
-export function summarizeMetrics(text: string, usdPerMillionInputTokens = 0.042, prices?: PriceTable): MetricsSummary {
+export function summarizeMetrics(text: string, usdPerMillionInputTokens = 0.042, prices?: PriceTable, since?: number): MetricsSummary {
   const events = text.split("\n").flatMap((line) => {
     if (!line.trim()) return [];
     try { return [JSON.parse(line) as MetricsEvent]; } catch { return []; }
-  });
+  }).filter((event) => since === undefined || Date.parse(event.at) >= since);
+  const shadowTasks = new Map<string, string>();
+  const shadowByModel: Record<string, number> = {};
+  let shadowDecisions = 0;
+  for (const event of events) {
+    if ("kind" in event || typeof event.shadowModel !== "string") continue;
+    shadowDecisions += 1;
+    shadowByModel[event.shadowModel] = (shadowByModel[event.shadowModel] ?? 0) + 1;
+    if (event.taskId) shadowTasks.set(event.taskId, event.shadowModel);
+  }
+  let shadowResponses = 0;
+  let appliedUsd: number | null = prices ? 0 : null;
+  let shadowUsd: number | null = prices ? 0 : null;
   const byClient: Record<string, number> = {};
   const byResult: Record<string, number> = {};
   const byEffort: Record<string, number> = {};
@@ -81,6 +103,16 @@ export function summarizeMetrics(text: string, usdPerMillionInputTokens = 0.042,
     if ("kind" in event) {
       observedResponses += 1;
       usages.push(event);
+      const shadowModel = event.taskId ? shadowTasks.get(event.taskId) : undefined;
+      if (shadowModel) {
+        shadowResponses += 1;
+        const applied = prices && priceFor(prices, event.servedModel);
+        const alternative = prices && priceFor(prices, shadowModel);
+        if (applied && alternative && appliedUsd !== null && shadowUsd !== null) {
+          appliedUsd += usageUsd(applied, event);
+          shadowUsd += usageUsd(alternative, event);
+        } else appliedUsd = shadowUsd = null;
+      }
       if (event.requestedModel !== event.servedModel) differentModelIds += 1;
       observedInputTokens += event.inputTokens ?? 0;
       cachedInputTokens += event.cachedInputTokens ?? 0;
@@ -131,6 +163,8 @@ export function summarizeMetrics(text: string, usdPerMillionInputTokens = 0.042,
     estimatedJevUsd: jevInputTokens * usdPerMillionInputTokens / 1_000_000,
     jevAttempts, jevErrors, jevErrorRate, warnings,
     ...(prices ? { agentCost: agentCost(prices, usages) } : {}),
+    shadow: { decisions: shadowDecisions, byModel: shadowByModel, tasks: shadowTasks.size, responses: shadowResponses,
+      appliedUsd: shadowResponses ? appliedUsd : null, shadowUsd: shadowResponses ? shadowUsd : null },
     observedResponses, differentModelIds, observedInputTokens, cachedInputTokens, observedOutputTokens,
     observedCacheReadRate: observedInputTokens ? cachedInputTokens / observedInputTokens : null,
     tasks: {
@@ -149,6 +183,6 @@ export function summarizeMetrics(text: string, usdPerMillionInputTokens = 0.042,
   };
 }
 
-export function readMetricsFile(path: string, prices?: PriceTable): MetricsSummary {
-  return summarizeMetrics(readFileSync(path, "utf8"), undefined, prices);
+export function readMetricsFile(path: string, prices?: PriceTable, since?: number): MetricsSummary {
+  return summarizeMetrics(readFileSync(path, "utf8"), undefined, prices, since);
 }

@@ -109,7 +109,7 @@ export function unconfigureClaude(current: string, previous: string | null, repo
 const xml = (value: string): string => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;");
 export function servicePlist(context: InstallContext): string {
   const args = [context.node, `--env-file=${join(context.repo, ".env")}`, join(context.repo, "dist/cli.js"), "serve", "--mode", "auto", "--baseline-model", "gpt-6-astra",
-    "--downgrade-confidence", "0.9", "--port", String(PORT), "--metrics", join(context.repo, ".local/codex-persistent.jsonl")];
+    "--downgrade-confidence", "0.9", "--shadow-fast-confidence", "0.7", "--port", String(PORT), "--metrics", join(context.repo, ".local/codex-persistent.jsonl")];
   return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>\n<key>Label</key><string>${LABEL}</string>\n<key>ProgramArguments</key><array>${args.map((arg) => `<string>${xml(arg)}</string>`).join("")}</array>\n<key>WorkingDirectory</key><string>${xml(context.repo)}</string>\n<key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>ThrottleInterval</key><integer>10</integer><key>Umask</key><integer>63</integer>\n<key>StandardOutPath</key><string>${xml(join(context.repo, ".local/router.stdout.log"))}</string>\n<key>StandardErrorPath</key><string>${xml(join(context.repo, ".local/router.stderr.log"))}</string>\n</dict></plist>\n`;
 }
 
