@@ -1,80 +1,116 @@
 # Agent Model Router
 
-TypeSafe Jev가 사용자 턴의 모델 등급(`fast`·`balanced`·`strong`)과 사고량(`low`부터 `max`까지)을 한 번에 판정해 Codex와 Claude Code에 적용합니다. Codex CLI·데스크톱 앱과 Claude Code CLI·데스크톱 **Code 탭**에서 사용합니다. Claude의 일반 채팅에는 적용되지 않습니다.
+**메시지를 보낼 때마다 모델과 effort를 자동으로 선택하고, 답변 끝에서 결과를 확인하세요.**
 
-## 1. 설치와 키 준비
+```text
+I have one apple.
 
-Node.js 22 이상, 사용할 클라이언트(Codex 또는 Claude Code)의 로그인, TypeSafe API 키가 필요합니다. 저장소 루트에서:
+— 모델: gpt-6-luna · 요청 effort: low
+```
+
+위 표시는 예시입니다. 모델은 실제 응답 메타데이터, effort는 요청한 값입니다. 한 답변을 생성하는 도중 구간별로 모델을 바꾸지는 않습니다. TypeSafe Jev가 턴을 분류하고, Codex 또는 Claude Code가 답변합니다.
+
+## 가장 쉬운 설치: macOS에서 한 번 설정하기
+
+Codex 또는 Claude Code에 먼저 로그인하고 **Node.js 22 이상**을 설치하세요. 두 클라이언트를 함께 설치하려면 Claude CLI의 `claude` 명령도 있어야 합니다. TypeSafe API 키가 하나 필요합니다.
+
+### 1. 다운로드
+
+터미널에서 한 번 실행하세요. 이미 저장소를 내려받았다면 해당 폴더로 이동하고 `npm ci`만 실행하면 됩니다.
 
 ```bash
+git clone https://github.com/starhn87/agent-model-router.git
+cd agent-model-router
 npm ci
-npm run build
-cp .env.example .env
 ```
 
-`.env`의 `TYPESAFE_API_KEY=` 뒤에 키를 입력하세요. macOS·Linux에서는 `chmod 600 .env`로 파일 권한을 제한할 수 있습니다. Windows에서는 `cp` 대신 `Copy-Item .env.example .env`를 사용하세요. `.env`는 Git에서 제외되지만 로컬에는 평문으로 저장됩니다. 다른 비밀 저장 방식은 [키 설정 안내](docs/local-secrets.md)에 있습니다.
+### 2. 키 입력
 
-## 2. Codex CLI와 앱에 적용
-
-저장소 루트의 터미널에서 라우터를 시작하고, **Codex를 사용하는 동안 이 터미널을 열어 두세요.**
+처음 설치할 때만 `.env.example`을 `.env`로 복사하고, 편집기로 `.env`를 열어 `TYPESAFE_API_KEY=` 뒤에 TypeSafe 키를 입력하세요. 이미 `.env`가 있다면 덮어쓰지 마세요.
 
 ```bash
-node --env-file=.env dist/cli.js serve --mode auto --baseline-model gpt-6-astra --port 8765 --metrics .local/codex.jsonl
+cp -n .env.example .env
+open -e .env
 ```
 
-기존 `~/.codex/config.toml`이 있다면 백업한 뒤, 파일 **최상위**의 `model`·`model_provider`를 아래 값으로 설정하고 공급자 테이블을 병합합니다. 다른 설정은 유지하세요.
+키는 로컬 파일에만 입력하세요. Git에는 포함되지 않습니다. 자동 분류는 메시지 텍스트 최대 1,600자를 유료 TypeSafe API로 보낼 수 있습니다.
 
-```toml
-model = "gpt-6-astra"
-model_provider = "agent_router"
-
-[model_providers.agent_router]
-name = "Agent Model Router"
-base_url = "http://127.0.0.1:8765"
-wire_api = "responses"
-requires_openai_auth = true
-supports_websockets = false
-```
-
-Codex 앱을 재시작하고 **새 작업**을 만드세요. 앱 모델 목록에서는 실제 지원 모델 ID `gpt-6-astra`가 **Jev Auto**로 표시됩니다. 이 항목을 선택하면 턴마다 모델과 effort를 자동으로 정합니다. CLI도 새 `codex` 세션부터 적용됩니다. 기준 모델과 다른 모델을 수동 선택하면 라우팅을 건너뜁니다. 라우터를 중지한 채 위 공급자 설정을 사용하면 요청이 실패하므로, 상시 사용하려면 서버 명령을 로그인 시 실행되는 서비스에 등록해야 합니다.
-
-**설정 변경 전에 만든 작업은 기존 공급자 연결을 유지할 수 있습니다.** 이 경우 모델 목록에 Jev Auto가 보여도 라우터를 거치지 않습니다. 기존 작업의 모델만 바꾸는 대신 새 작업을 만들고, 메시지를 보낸 뒤 아래 상태 화면의 마지막 기록 시각이 바뀌는지 확인하세요.
-
-Codex 앱의 브라우저 패널이나 일반 브라우저에서 [상태 화면](http://127.0.0.1:8765/status)을 열면 로컬 라우터를 거친 자동 라우팅 요청의 **실제 응답 모델**과 **요청한 effort**가 3초마다 갱신됩니다. 현재 앱의 effort 메뉴는 고정된 값만 허용하므로 별도 Auto 항목을 추가할 수 없습니다. Jev Auto에서는 effort도 자동으로 정하며, 앱에 표시된 값과 실제 요청값이 다를 수 있습니다. 보고서의 `byEffort`도 요청한 턴별 값입니다.
+### 3. 설치 및 적용
 
 ```bash
-curl -fsS http://127.0.0.1:8765/health
-node dist/cli.js report .local/codex.jsonl
+npm run setup
 ```
 
-## 3. Claude Code CLI와 앱 Code 탭에 적용
+이 명령이 기존 설정을 백업하고, **Codex와 Claude Code를 함께 설정**합니다. 설정 파일을 직접 편집하거나 서버 터미널을 계속 켜 둘 필요가 없습니다.
 
-macOS·Linux에서는 저장소 루트에서 플러그인을 사용자 범위에 연결합니다. Windows에서는 `claude-mod` 폴더를 사용자 `.claude/skills/agent-model-router`로 복사할 수 있습니다.
+하나만 쓴다면 대신 아래 중 하나를 실행하세요.
 
 ```bash
-mkdir -p "$HOME/.claude/skills"
-ln -s "$(pwd -P)/claude-mod" "$HOME/.claude/skills/agent-model-router"
+npm run setup -- codex
+npm run setup -- claude
 ```
 
-`~/.claude/settings.json`의 기존 `env` 객체에 아래 세 값을 **병합**합니다. `ABSOLUTE_PATH_TO_REPO`를 저장소의 실제 절대 경로로 바꾸세요. 키 값은 설정 파일에 넣지 않습니다.
+- **Codex:** 앱을 재시작하고 **새 작업**을 만든 다음 `Jev Auto`를 선택하세요. CLI도 새 세션부터 적용됩니다. 예전 작업은 옛 공급자 연결을 유지할 수 있습니다.
+- **Claude Code:** 새 CLI 세션 또는 Claude 앱의 **Code 탭** 세션을 시작하면 적용됩니다. 일반 Chat 탭에는 적용되지 않습니다.
 
-```json
-{
-  "env": {
-    "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS": "1",
-    "AMR_CLAUDE_AUTO": "1",
-    "AMR_ENV_FILE": "ABSOLUTE_PATH_TO_REPO/.env"
-  }
-}
+정상적으로 완료한 답변 아래에 모델과 요청 effort가 표시됩니다. Claude에서는 `/amr-route`로 최근 판정도 확인할 수 있습니다. 앱의 고정 모델·effort 메뉴는 실제 턴별 결과와 다를 수 있습니다.
+
+## 지금 내 컴퓨터에서 왜 동작하나요?
+
+```bash
+npm run doctor
 ```
 
-새 Claude Code CLI 세션이나 데스크톱 **Code 탭** 세션에서 사용하세요. `/amr-route`를 실행하면 최근 판정, 요청한 effort, 실제 응답 모델을 볼 수 있습니다. 앱의 모델 배지는 세션 모델이므로 턴별 전환 결과와 다를 수 있습니다. 함수 훅은 초기 접근 기능이므로 Claude 업데이트 후 `claude plugin validate --strict claude-mod`와 공개 예문 한 턴으로 다시 확인하세요.
+설정을 변경하거나 유료 모델을 호출하지 않고, 다음을 경로와 함께 보여줍니다.
 
-## 사용 전 알아둘 점
+| 클라이언트 | 설치 도구가 설정하는 것 | 동작하는 이유 |
+| --- | --- | --- |
+| Codex | `~/.codex/config.toml`의 `agent_router` 공급자 | 요청이 `127.0.0.1:8765`의 라우터를 거칩니다. |
+| Codex | `~/Library/LaunchAgents/com.agent-model-router.codex.plist` | 로그인할 때 서버가 자동으로 시작됩니다. |
+| Claude Code | `~/.claude/skills/agent-model-router` 플러그인 연결 | 턴마다 함수 훅이 모델과 effort를 선택합니다. |
+| Claude Code | `~/.claude/settings.json`의 `env` | 함수 훅·자동 라우팅을 켜고 `.env`의 위치를 알려줍니다. |
 
-- 기본 매핑: Codex `fast=gpt-6-luna`, `balanced=gpt-6-sol`, `strong=gpt-6-astra`; Claude `fast=haiku`, `balanced=sonnet`, `strong=opus`. Jev의 사고량 점수는 `low`·`medium`·`high`·`xhigh`·`max` 중 하나로 적용됩니다. Codex 자동 전환에서는 선택한 모델의 지원 범위에 맞추고 기존 effort 선택을 덮어씁니다.
-- 자동 분류는 사용자 턴의 텍스트 최대 1,600자를 **유료 TypeSafe API**로 보낼 수 있습니다. 민감한 내용을 다룰 때는 자동 전환을 끄세요.
-- Codex는 `~/.codex/config.toml`의 모델·공급자를 원래 값으로 되돌리고 앱을 재시작하면 해제됩니다. Claude는 `AMR_CLAUDE_AUTO`를 `0`으로 바꾸고 새 세션을 시작하면 해제됩니다.
-- 이 저장소는 전역 설정을 자동으로 수정하지 않습니다. 합성 사례 검증 결과와 남은 한계는 [검증 기록](docs/validation-plan.md)에 있습니다.
+예전 안내대로 수동 설치했다면 설치 도구 기록이 없어도 위 연결로 작동할 수 있습니다. `npm run setup`을 실행하면 기존 설치를 관리 대상으로 등록합니다. 이후에는 같은 명령으로 서버를 재시작할 수 있습니다. 저장소 폴더는 실행 중 계속 필요하므로 설치 후 삭제하거나 옮기지 마세요.
+
+## 업데이트 또는 해제
+
+업데이트는 저장소 폴더에서 실행합니다.
+
+```bash
+git pull --ff-only
+npm ci
+npm run setup
+```
+
+해제는 다음과 같습니다. 하나만 해제하려면 뒤에 `-- codex` 또는 `-- claude`를 붙이세요.
+
+```bash
+npm run disable
+```
+
+설치 전 모델·공급자와 관리 대상 환경변수를 복원하고, 라우터 서비스와 플러그인 연결을 제거합니다. 기존 수동 라우터 설치를 등록한 경우에는 Codex를 기본 `openai` 공급자로 돌리고 Claude 자동 라우팅을 끕니다. 관련 없는 설정과 `.env`는 보존합니다. 앱을 재시작하고 새 세션을 사용하세요. **기존 Codex 작업은 해제 후에도 옛 라우터를 찾을 수 있으므로 새 작업이 필요합니다.**
+
+백업과 설치 기록은 `~/.agent-model-router/`에 저장됩니다. 설치 후 라우터가 관리하는 값을 직접 수정했다면 해제는 덮어쓰지 않고 충돌을 알려줍니다.
+
+## 마켓플레이스로도 설치할 수 있나요?
+
+**Claude Code용 마켓플레이스 파일을 제공합니다.** 이 버전이 원격 저장소에 게시된 뒤 다음 명령으로 추가할 수 있습니다.
+
+```bash
+claude plugin marketplace add starhn87/agent-model-router
+claude plugin install agent-model-router@agent-model-router
+```
+
+마켓플레이스는 플러그인 배포·업데이트를 담당합니다. TypeSafe 키와 초기 접근 함수 훅 설정은 별도로 필요해서, 개인 사용에는 위의 **`npm run setup`을 권장**합니다. 두 설치 방식을 중복 적용하지 마세요. 마켓플레이스 방식의 나머지 설정과 로컬 테스트는 [고급 설치 안내](docs/installation.md#claude-code-마켓플레이스)에 있습니다.
+
+**Codex는 현재 이 프로젝트의 마켓플레이스 설치를 제공하지 않습니다.** 자동 라우팅에는 로컬 프록시와 모델 공급자 설정이 필요합니다. 플러그인을 추가하는 것만으로 모두 적용되는 기능으로 안내하지 않습니다. `npm run setup -- codex`가 이 두 단계를 묶어 처리합니다.
+
+## 지원 범위와 표시 예외
+
+- 통합 자동 설치와 로그인 시 Codex 서버 실행: **macOS**. Claude 단독 설치는 macOS·Linux에서 사용할 수 있습니다. Windows와 다른 운영체제의 Codex 실행은 [수동 설치](docs/installation.md)를 참고하세요.
+- Codex 자동 선택: `fast=gpt-6-luna`, `balanced=gpt-6-sol`, `strong=gpt-6-astra`. Claude: Haiku·Sonnet·Opus. 짧은 후속 지시, 큰 문맥, 낮은 신뢰도 등 보호 규칙에서는 추천과 다른 모델을 유지할 수 있습니다.
+- Codex 수동 모델 선택·도구 호출 중간 메시지·구조화 JSON 출력·제목 생성·실패/중단 응답에는 요약을 붙이지 않습니다. 읽을 수 없는 응답 형식은 원문을 보존합니다. Claude 요약은 화면 하단 표시이며 대화 원문에는 추가하지 않습니다.
+- Claude 함수 훅은 초기 접근 기능입니다. 버전·조직 정책에 따라 사용할 수 없을 수 있습니다. `npm run doctor`는 설정 확인이며, 실제 연결은 새 세션의 응답과 `/amr-route`로 확인하세요.
+- 로컬 상태 웹은 문제 해결용으로 남아 있지만 일상 확인에는 필요하지 않습니다. 키 보관은 [키 설정 안내](docs/local-secrets.md), 테스트 근거와 한계는 [검증 기록](docs/validation-plan.md)을 참고하세요.
 
 Codex 프로토콜 연결은 [jev-router](https://github.com/gargpratyush/jev-router), 모델 전환과 Claude 함수 훅은 [jev-model-router](https://github.com/satviksinha/jev-model-router)를 참고해 독립적으로 구현했습니다.

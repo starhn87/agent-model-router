@@ -1,6 +1,6 @@
 {
   "name": "agent-model-router",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "bin": {
@@ -8,6 +8,9 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "setup": "npm run build && node dist/cli.js install",
+    "doctor": "npm run build && node dist/cli.js doctor",
+    "disable": "npm run build && node dist/cli.js uninstall",
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --test dist/*.test.js claude-mod/tests/*.test.js"
   },

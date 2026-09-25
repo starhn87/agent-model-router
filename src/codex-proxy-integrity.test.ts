@@ -102,7 +102,7 @@ test("interrupted SSE fails the client stream and leaves the proxy healthy", { t
   await assert.rejects(reader.read());
   assert.equal(deadline.aborted, false, "upstream failure must terminate the stream before the client timeout");
   const health = await fetch(`${proxy.url}/health`, { signal: proxy.signal });
-  assert.deepEqual(await health.json(), { status: "ok" });
+  assert.equal((await health.json() as { status: string }).status, "ok");
 });
 
 test("interrupted model catalog returns a sanitized 502 instead of hanging", { timeout: 3000 }, async (context) => {

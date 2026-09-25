@@ -85,6 +85,11 @@ export class CodexRouter {
       this.shouldRoute(body.model) && allowsResponseFooter(body);
   }
 
+  health(): Record<string, unknown> {
+    return { status: "ok", service: "agent-model-router", mode: this.options.settings.mode,
+      responseFooter: this.options.responseFooter !== false && this.options.settings.mode === "auto" };
+  }
+
   ingestCatalog(payload: unknown): unknown {
     if (!isRecord(payload) || !Array.isArray(payload.models)) return payload;
     const models = payload.models.filter(isRecord) as CatalogModel[];
@@ -218,7 +223,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
   if (!rawPath.startsWith("/") || rawPath.startsWith("//")) return respondError(response, 400, "invalid path");
   if (request.method === "GET" && rawPath === "/health") {
     response.writeHead(200, { "content-type": "application/json" });
-    response.end('{"status":"ok"}');
+    response.end(JSON.stringify(router.health()));
     return;
   }
   if (request.method === "GET" && (rawPath === "/status" || rawPath === "/status.json")) {

@@ -112,3 +112,15 @@ Claude 데스크톱 Code 탭에서 새 로컬 세션의 공개 합성 맞춤법 
 도구 호출·중간 commentary·중단/오류 응답에는 표시하지 않는다. Codex의 구조화 출력·제목 생성·수동 모델·pass/shadow 모드는 보존한다. 미지원 형식·압축·4MiB를 초과하는 보류 데이터는 원문을 전달한다. Claude에서 `AMR_RESPONSE_FOOTER=0`, Codex에서 `--response-footer off`로 끌 수 있다.
 
 합성 스트림의 한 바이트 청크·한글/이모지·CRLF·완료 이벤트 순서·실제 모델과 요청 모델 불일치·JSON 응답·관찰 지표 보존을 검증했다. Claude 플러그인 strict 검증과 완료/중단/하위 에이전트/옵트아웃 훅 테스트를 통과했다. 실제 데스크톱 UI의 새 버전 표시는 별도 적용 후 확인 대상이다.
+
+추가 연결 확인: 설치된 Codex CLI `0.155.0-alpha.16.4`에 로컬 합성 Responses 서버와 합성 Jev 판정을 연결했다. CLI의 `item.completed` 최종 메시지에 `Synthetic footer check.\n\n— 모델: gpt-6-luna · 요청 effort: low`가 정확히 한 번 포함됐고 `turn.completed`·종료 코드 0을 확인했다. 실제 TypeSafe·OpenAI 모델 요청은 사용하지 않았고 전역 공급자 설정은 변경하지 않았다. Claude는 `turn.complete` 공식 타입 계약과 플러그인 strict 검사·합성 훅 테스트로 검증했으며 실제 UI 확인은 새 세션 적용 후 진행한다.
+
+## 간편 설치 도구와 마켓플레이스
+
+`npm run setup [-- codex|claude]`, `npm run doctor`, `npm run disable [-- codex|claude]`를 추가했다. macOS의 Codex LaunchAgent와 두 클라이언트의 사용자 설정을 백업·등록·진단·해제하며, 이전 수동 설치도 등록한다. 기존 수동 라우터를 등록했다가 해제하면 Codex는 `openai` 공급자로, Claude 자동 라우팅은 꺼짐으로 복귀한다. 새로운 기본 경로 설치에서는 원래 설정값으로 복원한다.
+
+임시 사용자 디렉터리에서 관련 없는 설정 보존, 설치 반복, 해제, 마켓플레이스 중복 방지, 다른 플러그인 경로 충돌, 포트 충돌, 서버 시작 실패 복원, XML 경로 이스케이프, 사용자 지정 설정 경로 보호를 검증했다. 서버 제어와 준비 응답은 이 테스트에서 모의 실행했으며 실제 LaunchAgent 변경 검증을 대신하지 않는다. 실제 사용자 환경의 읽기 전용 진단에서는 Claude 로컬 플러그인·자동 설정, Codex 공급자·기존 서비스·구버전 서버 응답을 확인했다. 사용자 설정과 실행 중인 서비스는 아직 설치 도구로 변경하지 않았다.
+
+Claude 마켓플레이스 목록과 플러그인 strict 검사를 통과했다. 마켓플레이스 등록은 이 버전을 원격에 게시한 후 사용할 수 있다. Codex 마켓플레이스 패키지는 제공하지 않으며 공식 공급자 설정과 로컬 서비스 실행을 설치 도구로 묶었다.
+
+이번 변경의 최종 자동 검증: 테스트 84개, TypeScript 타입 검사, Claude 플러그인·마켓플레이스 strict 검증, `git diff --check` 통과. 로컬 모델 모의 서버를 이용한 Codex CLI 완료 확인을 포함하며 실제 Claude 데스크톱 UI나 새 LaunchAgent의 실운영 검증은 포함하지 않는다.

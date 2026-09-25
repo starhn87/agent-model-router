@@ -11,6 +11,7 @@ import { writeMetric } from "./metrics.js";
 import { defaultSettings } from "./policy.js";
 import { readMetricsFile } from "./report.js";
 import { evaluateCases, readEvaluationCases } from "./evaluate.js";
+import { defaultInstallContext, doctor, install, uninstall, type Client } from "./install.js";
 import type { Mode, RouteChoice, RouteQuery, RouterSettings, Tier } from "./types.js";
 
 type Parsed = { settings: RouterSettings; metricsFile?: string; port?: number;
@@ -159,6 +160,9 @@ function help(): void {
     `Jev key: TYPESAFE_API_KEY in the process environment.\n` +
     `         For a local .env file, run: node --env-file=.env dist/cli.js ...\n` +
     `         macOS login Keychain is optional via the flags below.\n\n` +
+    `  amr install [both|codex|claude]  (Codex background setup: macOS)\n` +
+    `  amr doctor\n` +
+    `  amr uninstall [both|codex|claude]\n\n` +
     `  amr codex [router options] -- [codex arguments]\n` +
     `  amr serve [router options]  (for Codex desktop; default port 8765; /status with --metrics)\n` +
     `  amr claude-shadow-hook --metrics FILE [--keychain-service NAME --keychain-account USER]\n` +
@@ -173,6 +177,16 @@ function help(): void {
 async function main(): Promise<void> {
   const [command, ...args] = process.argv.slice(2);
   if (!command || command === "help" || command === "--help") return help();
+  if (command === "install" || command === "uninstall" || command === "doctor") {
+    const client = args[0] ?? "both";
+    if ((command === "doctor" && args.length) || args.length > 1 || !["both", "codex", "claude"].includes(client)) {
+      throw new Error("사용법: amr install|uninstall [both|codex|claude], amr doctor");
+    }
+    const context = defaultInstallContext();
+    process.stdout.write(command === "doctor" ? await doctor(context)
+      : command === "install" ? await install(client as Client, context) : uninstall(client as Client, context));
+    return;
+  }
   if (command === "report") {
     if (!args[0]) throw new Error("metrics file required");
     process.stdout.write(`${JSON.stringify(readMetricsFile(args[0]), null, 2)}\n`);
