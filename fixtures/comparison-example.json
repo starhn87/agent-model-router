@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "fixedPolicy": "gpt-6-sol/medium",
+  "autoPolicy": "Jev Auto",
+  "cases": [
+    {
+      "id": "example-1",
+      "fixed": { "completed": true, "qualityScore": 4, "elapsedMs": 120000, "billedUsd": 0.12, "manualCorrections": 0 },
+      "auto": { "completed": true, "qualityScore": 4, "elapsedMs": 90000, "billedUsd": 0.08, "manualCorrections": 0 }
+    },
+    {
+      "id": "example-2",
+      "fixed": { "completed": true, "qualityScore": 5, "elapsedMs": 180000, "billedUsd": 0.24, "manualCorrections": 0 },
+      "auto": { "completed": false, "qualityScore": 2, "elapsedMs": 200000, "billedUsd": 0.17, "manualCorrections": 2 }
+    }
+  ]
+}

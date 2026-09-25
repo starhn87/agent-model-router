@@ -26,6 +26,7 @@ npm run doctor
 ```bash
 npm run build
 node dist/cli.js report .local/codex-persistent.jsonl
+node dist/cli.js compare fixtures/comparison-example.json
 ```
 
 Codex 앱을 재시작하고 새 작업에서 `Jev Auto`를 선택하세요. Claude Code는 새 세션을 시작하세요.

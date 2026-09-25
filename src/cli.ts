@@ -11,6 +11,7 @@ import { writeMetric } from "./metrics.js";
 import { defaultSettings } from "./policy.js";
 import { readMetricsFile } from "./report.js";
 import { evaluateCases, readEvaluationCases } from "./evaluate.js";
+import { compareRuns, readComparisonInput } from "./compare.js";
 import { defaultInstallContext, doctor, install, uninstall, type Client } from "./install.js";
 import type { Mode, RouteChoice, RouteQuery, RouterSettings, Tier } from "./types.js";
 
@@ -167,6 +168,7 @@ function help(): void {
     `  amr serve [router options]  (for Codex desktop; default port 8765; /status with --metrics)\n` +
     `  amr claude-shadow-hook --metrics FILE [--keychain-service NAME --keychain-account USER]\n` +
     `  amr report FILE\n\n` +
+    `  amr compare FILE  (paired fixed and auto results; no model calls)\n` +
     `  amr evaluate FILE --max-calls N [--keychain-service NAME --keychain-account USER]  (paid Jev calls)\n\n` +
     `Router options: --mode pass|force|shadow|auto, --force-model ID,\n` +
     `  --baseline-model ID, --fast-model ID, --balanced-model ID,\n` +
@@ -190,6 +192,11 @@ async function main(): Promise<void> {
   if (command === "report") {
     if (!args[0]) throw new Error("metrics file required");
     process.stdout.write(`${JSON.stringify(readMetricsFile(args[0]), null, 2)}\n`);
+    return;
+  }
+  if (command === "compare") {
+    if (args.length !== 1) throw new Error("compare requires one results file");
+    process.stdout.write(`${JSON.stringify(compareRuns(readComparisonInput(args[0]!)), null, 2)}\n`);
     return;
   }
   if (command === "evaluate") {
