@@ -8,7 +8,19 @@ I have one apple.
 — 모델: gpt-6-luna · 요청 effort: low
 ```
 
-위 표시는 예시입니다. 모델은 실제 응답 메타데이터, effort는 요청한 값입니다. 한 답변을 생성하는 도중 구간별로 모델을 바꾸지는 않습니다. TypeSafe Jev가 턴을 분류하고, Codex 또는 Claude Code가 답변합니다.
+위 표시는 예시입니다. 모델은 실제 응답 메타데이터, effort는 요청한 값입니다. 한 답변을 생성하는 도중 구간별로 모델을 바꾸지는 않습니다. 로컬 규칙 또는 TypeSafe Jev가 턴을 분류하고, Codex 또는 Claude Code가 답변합니다.
+
+Codex의 자동 선택은 `fast / balanced / strong` 세 단계를 사용합니다.
+
+| 현재 요청 | 기본 동작 |
+| --- | --- |
+| `안녕`, `i has apple 맞춤법 고쳐줘`처럼 명확히 독립적인 인사·짧은 문장 교정 | Luna / low, 분류 API 호출 없음 |
+| 일반적인 새 작업 | 현재 요청을 Jev로 분류 |
+| 어려운 작업이라는 신뢰도 높은 판정 | Astra |
+| 새 대화의 기본값, 분류 실패·낮은 신뢰도 | Sol / medium |
+| `계속해`, `진행해` 같은 이어지는 지시와 도구 실행 후속 요청 | 이전 모델·effort 유지 |
+
+대화가 길다는 이유만으로 Astra를 유지하지 않습니다. 현재 요청 자체가 1,600자를 넘거나 민감정보 패턴·이미지를 포함하면 외부 분류를 건너뛰고 Sol을 사용합니다. 문장 교정 규칙은 교정할 짧은 원문이 명시된 일부 형식에만 적용하고, 그 외에는 Jev가 판단합니다. 모델과 effort는 계정에서 지원하는 범위로 제한됩니다. 아래 설치 방식의 `Jev Auto`는 호환성을 위해 Astra 모델 ID를 사용하지만, 이것이 실제 기본 실행 모델을 의미하지는 않습니다.
 
 ## 가장 쉬운 설치: macOS에서 한 번 설정하기
 
@@ -108,7 +120,7 @@ claude plugin install agent-model-router@agent-model-router
 ## 지원 범위와 표시 예외
 
 - 통합 자동 설치와 로그인 시 Codex 서버 실행: **macOS**. Claude 단독 설치는 macOS·Linux에서 사용할 수 있습니다. Windows와 다른 운영체제의 Codex 실행은 [수동 설치](docs/installation.md)를 참고하세요.
-- Codex 자동 선택: `fast=gpt-6-luna`, `balanced=gpt-6-sol`, `strong=gpt-6-astra`. Claude: Haiku·Sonnet·Opus. 짧은 후속 지시, 큰 문맥, 낮은 신뢰도 등 보호 규칙에서는 추천과 다른 모델을 유지할 수 있습니다.
+- Codex 자동 선택: `fast=gpt-6-luna`, `balanced=gpt-6-sol`, `strong=gpt-6-astra`. Claude: Haiku·Sonnet·Opus. 위의 Sol 기본값·로컬 간단 요청 규칙은 Codex 정책입니다. Claude는 기존의 짧은 후속 지시·낮은 신뢰도에서 세션 모델을 유지하는 정책을 사용합니다.
 - Codex 수동 모델 선택·도구 호출 중간 메시지·구조화 JSON 출력·제목 생성·실패/중단 응답에는 요약을 붙이지 않습니다. 읽을 수 없는 응답 형식은 원문을 보존합니다. Claude 요약은 화면 하단 표시이며 대화 원문에는 추가하지 않습니다.
 - Claude 함수 훅은 초기 접근 기능입니다. 버전·조직 정책에 따라 사용할 수 없을 수 있습니다. `npm run doctor`는 설정 확인이며, 실제 연결은 새 세션의 응답과 `/amr-route`로 확인하세요.
 - 로컬 상태 웹은 문제 해결용으로 남아 있지만 일상 확인에는 필요하지 않습니다. 키 보관은 [키 설정 안내](docs/local-secrets.md), 테스트 근거와 한계는 [검증 기록](docs/validation-plan.md)을 참고하세요.

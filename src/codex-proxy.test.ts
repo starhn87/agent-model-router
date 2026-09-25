@@ -209,7 +209,7 @@ test("uncertain turns after fast return to baseline while tool continuations sta
   assert.equal(calls, 4);
 });
 
-test("large, sensitive, and multimodal turns leave fast without calling Jev", async () => {
+test("oversized, sensitive, and multimodal turns leave fast without calling Jev", async () => {
   let calls = 0;
   const router = new CodexRouter({ settings: defaultSettings("auto"), classify: async () => {
     calls += 1;
@@ -226,12 +226,105 @@ test("large, sensitive, and multimodal turns leave fast without calling Jev", as
   assert.equal(calls, 3);
 });
 
-test("short, large-context and sensitive turns preserve a stronger model without classification", async () => {
+test("only explicit follow-ups preserve strong; protected new tasks fall back to balanced", async () => {
   let calls = 0;
   const router = new CodexRouter({ settings: defaultSettings("auto"), classify: async () => { calls += 1; return { tier: "strong", confidence: 0.95 }; } });
   assert.equal((await router.route(userBody())).model, "gpt-6-astra");
-  for (const prompt of ["진행해", "x".repeat(100_000), "이 설정에서 API_KEY=synthetic-secret 값을 확인해줘"]) {
-    assert.equal((await router.route(userBody(prompt))).model, "gpt-6-astra");
+  assert.equal((await router.route(userBody("진행해"))).model, "gpt-6-astra");
+  for (const prompt of ["x".repeat(100_000), "이 설정에서 API_KEY=synthetic-secret 값을 확인해줘"]) {
+    assert.equal((await router.route(userBody(prompt))).model, "gpt-6-sol");
   }
   assert.equal(calls, 1);
+});
+
+const installedSettings = { ...defaultSettings("auto"), baselineModel: "gpt-6-astra", minimumDowngradeConfidence: 0.9 };
+function installedBody(prompt: string): CodexBody {
+  return { ...userBody(prompt), model: installedSettings.baselineModel };
+}
+
+test("Astra Auto selector starts on balanced and failures reset model and effort", async () => {
+  const currentModels: string[] = [];
+  const router = new CodexRouter({ settings: installedSettings, classify: async (query) => {
+    currentModels.push(query.currentModel);
+    if (currentModels.length === 1) return { tier: "strong", confidence: 0.99, effortScore: 4 };
+    if (currentModels.length === 2) return { tier: "strong", confidence: 0.4, effortScore: 4 };
+    throw new Error("synthetic outage");
+  } });
+  for (const expected of [["gpt-6-astra", "max"], ["gpt-6-sol", "medium"], ["gpt-6-sol", "medium"]]) {
+    const routed = await router.route(installedBody("이 복잡한 오류를 분석해줘"));
+    assert.equal(routed.model, expected[0]);
+    assert.equal((routed.reasoning as any).effort, expected[1]);
+  }
+  assert.deepEqual(currentModels, ["gpt-6-sol", "gpt-6-astra", "gpt-6-sol"]);
+  const catalogResult = router.ingestCatalog(catalog) as typeof catalog;
+  assert.equal(catalogResult.models.find((model) => model.slug === "gpt-6-astra")?.display_name, "Jev Auto");
+  const manual = { ...installedBody("안녕"), model: "gpt-6-sol" };
+  assert.deepEqual(await router.route(manual), manual);
+});
+
+test("independent simple turns after long history use Luna low; continuations retain route and effort", async () => {
+  let calls = 0;
+  const router = new CodexRouter({ settings: installedSettings, classify: async () => {
+    calls += 1;
+    return { tier: "strong", confidence: 0.99, effortScore: 3 };
+  } });
+  assert.equal((await router.route(installedBody("이 복잡한 오류를 분석해줘"))).model, "gpt-6-astra");
+  const continued = await router.route(installedBody("계속해"));
+  assert.equal(continued.model, "gpt-6-astra");
+  assert.equal((continued.reasoning as any).effort, "xhigh");
+  for (const prompt of ["안녕", "i has apple 맞춤법 고쳐줘"]) {
+    const body = installedBody(prompt);
+    body.input = [{ role: "assistant", content: "history ".repeat(20_000) }, ...(body.input as unknown[])];
+    const routed = await router.route(body);
+    assert.equal(routed.model, "gpt-6-luna");
+    assert.equal((routed.reasoning as any).effort, "low");
+  }
+  const followUp = await router.route(installedBody("진행해"));
+  assert.equal(followUp.model, "gpt-6-luna");
+  assert.equal((followUp.reasoning as any).effort, "low");
+  const tools = await router.route({ ...installedBody(""), input: [{ type: "function_call_output", output: "done" }] });
+  assert.equal(tools.model, "gpt-6-luna");
+  assert.equal((tools.reasoning as any).effort, "low");
+  assert.equal(calls, 1);
+});
+
+test("long history and short independent requests still reach the classifier", async () => {
+  let calls = 0;
+  const router = new CodexRouter({ settings: installedSettings, classify: async (query) => {
+    calls += 1;
+    if (calls === 1) return { tier: "strong", confidence: 0.99, effortScore: 3 };
+    assert.equal(query.prompt, "2+2는?");
+    assert.ok(query.contextTokens > 24_000);
+    return { tier: "fast", confidence: 0.85, effortScore: 0 };
+  } });
+  await router.route(installedBody("이 복잡한 오류를 분석해줘"));
+  const body = installedBody("2+2는?");
+  body.input = [{ role: "assistant", content: "history ".repeat(20_000) }, ...(body.input as unknown[])];
+  const result = await router.route(body);
+  assert.equal(result.model, "gpt-6-sol");
+  assert.equal((result.reasoning as any).effort, "medium");
+  assert.equal(calls, 2);
+});
+
+test("fresh continuations use balanced medium and autoEffort opt-out preserves requested effort", async () => {
+  for (const autoEffort of [true, false]) {
+    const router = new CodexRouter({ settings: { ...installedSettings, autoEffort }, classify: async () => { throw new Error("must skip"); } });
+    const continuation = await router.route(installedBody("계속해"));
+    assert.equal(continuation.model, "gpt-6-sol");
+    assert.equal((continuation.reasoning as any).effort, autoEffort ? "medium" : "ultra");
+    const simple = await router.route(installedBody("안녕"));
+    assert.equal(simple.model, "gpt-6-luna");
+    assert.equal((simple.reasoning as any).effort, autoEffort ? "low" : "ultra");
+  }
+});
+
+test("local routes do not mutate pass or shadow requests, and force still wins", async () => {
+  for (const mode of ["pass", "shadow", "force"] as const) {
+    const router = new CodexRouter({ settings: { ...installedSettings, mode, forceModel: "gpt-6-luna" },
+      classify: async () => { throw new Error("must skip"); } });
+    for (const prompt of ["안녕", "계속해", "secret=x", "x".repeat(1601)]) {
+      const body = installedBody(prompt);
+      assert.deepEqual(await router.route(body), mode === "force" ? { ...body, model: "gpt-6-luna" } : body);
+    }
+  }
 });

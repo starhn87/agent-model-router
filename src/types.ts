@@ -19,6 +19,7 @@ export type RouteQuery = {
 
 export type RouteResult = {
   model: string;
+  effort?: Effort;
   tier?: Tier;
   confidence?: number;
   reason: string;
@@ -26,13 +27,13 @@ export type RouteResult = {
 
 export type RouterSettings = {
   mode: Mode;
+  // Client model ID used as the Auto selector; not the default execution model.
   baselineModel: string;
   forceModel?: string;
   models: Record<Tier, string>;
   minimumConfidence: number;
   autoEffort: boolean;
   minimumDowngradeConfidence?: number;
-  maxContextTokens: number;
 };
 
 export type DecisionEvent = {

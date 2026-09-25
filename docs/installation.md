@@ -20,6 +20,8 @@ npm run build
 node --env-file=.env dist/cli.js serve --mode auto --baseline-model gpt-6-astra --port 8765 --metrics .local/codex.jsonl
 ```
 
+`--baseline-model`은 `Jev Auto`로 표시할 클라이언트 모델 ID입니다. 자동 모드의 실제 초기·실패 시 모델은 `--balanced-model`(기본 `gpt-6-sol`)입니다. 기존 Astra 설정을 바꾸지 않고 새 정책을 사용할 수 있습니다. 기본 effort는 `medium`, 로컬에서 판별한 간단한 인사·문장 교정은 `low`입니다. `--downgrade-confidence`를 지정하면 기준에 못 미친 하향 추천은 balanced로 처리합니다. 자동 설치는 이 기준을 `0.9`로 설정합니다.
+
 이 터미널을 열어 둔 상태에서 Codex 설정의 **최상위** 모델·공급자와 해당 공급자 테이블을 아래와 같이 병합하세요.
 
 ```toml

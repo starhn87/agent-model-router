@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { askJev } from "./jev.js";
 import { codexSessionKey, estimateContextTokens, latestUserTurn, type CodexBody } from "./codex-request.js";
 import { CodexResponseObserver, type ObservedResponse } from "./codex-response.js";
-import { chooseModel, effortFromScore, fallbackModel, routingGuard } from "./policy.js";
+import { chooseModel, fallbackModel, localRoute } from "./policy.js";
 import { readRecentStatus, renderStatusPage } from "./status.js";
 import { allowsResponseFooter, ResponseFooter, withoutResponseFooters } from "./response-footer.js";
 import type { DecisionEvent, ResponseObservationEvent, RouteChoice, RouteQuery, RouteResult, RouterSettings } from "./types.js";
@@ -126,7 +126,8 @@ export class CodexRouter {
     }
     const key = codexSessionKey(body);
     const previous = key ? this.sessions.get(key) : undefined;
-    const currentModel = previous?.model ?? settings.baselineModel;
+    const currentModel = previous?.model ?? (settings.mode === "auto"
+      ? fallbackModel(settings.baselineModel, settings, this.allowedModels()) : settings.baselineModel);
     const turn = latestUserTurn(body);
     const incomingEffort = isRecord(body.reasoning) && typeof body.reasoning.effort === "string"
       ? body.reasoning.effort : undefined;
@@ -135,7 +136,9 @@ export class CodexRouter {
 
     if (turn) {
       const query: RouteQuery = { prompt: turn.prompt, currentModel, contextTokens: estimateContextTokens(body) };
-      const guard = turn.hasNonText ? "multimodal-turn" : routingGuard(query, settings);
+      const local = turn.hasNonText
+        ? { model: fallbackModel(currentModel, settings, this.allowedModels()), effort: "medium" as const, reason: "multimodal-turn" }
+        : localRoute(query, settings, this.allowedModels());
       if (settings.mode === "pass") {
         result = { model: settings.baselineModel, reason: "pass-mode" };
       } else if (settings.mode === "force") {
@@ -143,14 +146,18 @@ export class CodexRouter {
         result = this.allowedModels()?.size && !this.catalog.has(requested)
           ? { model: currentModel, reason: "forced-model-unavailable" }
           : { model: requested, reason: "forced-model" };
-      } else if (guard) {
-        result = { model: guard === "short-follow-up" ? currentModel : fallbackModel(currentModel, settings), reason: guard };
+      } else if (local) {
+        result = settings.mode === "shadow" ? { model: currentModel, reason: local.reason } : local;
+        if (settings.mode === "auto") {
+          if (local.reason === "context-follow-up") selectedEffort = previous?.effort ?? (settings.autoEffort ? "medium" : incomingEffort);
+          else if (settings.autoEffort) selectedEffort = local.effort;
+        }
       } else if (settings.mode === "shadow") {
         const started = Date.now();
         void this.classify(query).then((choice) => {
           const recommendation = chooseModel(query, choice, settings, this.allowedModels());
           this.report({ result: "shadow", model: currentModel, recommendedTier: recommendation.tier,
-            ...(settings.autoEffort ? { recommendedEffort: effortFromScore(choice.effortScore) } : {}),
+            ...(settings.autoEffort ? { recommendedEffort: recommendation.effort } : {}),
             confidence: recommendation.confidence, latencyMs: Date.now() - started, jevInputTokens: choice.inputTokens, reason: recommendation.reason }, requestId);
         }).catch(() => {
           this.report({ result: "error", model: currentModel, latencyMs: Date.now() - started, reason: "jev-unavailable" }, requestId);
@@ -161,18 +168,19 @@ export class CodexRouter {
         try {
           const choice = await this.classify(query);
           result = chooseModel(query, choice, settings, this.allowedModels());
-          if (settings.autoEffort) selectedEffort = effortFromScore(choice.effortScore) ?? selectedEffort;
+          if (settings.autoEffort) selectedEffort = result.effort;
           this.report({ result: result.model === currentModel ? "kept" : "routed", model: result.model,
             effort: this.effectiveEffort(result.model, selectedEffort),
             recommendedTier: result.tier, confidence: result.confidence, latencyMs: Date.now() - started,
             jevInputTokens: choice.inputTokens, reason: result.reason }, requestId);
         } catch {
-          result = { model: fallbackModel(currentModel, settings), reason: "jev-unavailable" };
+          result = { model: fallbackModel(currentModel, settings, this.allowedModels()), reason: "jev-unavailable" };
+          if (settings.autoEffort) selectedEffort = "medium";
           this.report({ result: "error", model: result.model, effort: this.effectiveEffort(result.model, selectedEffort),
             latencyMs: Date.now() - started, reason: result.reason }, requestId);
         }
       }
-      if (settings.mode === "pass" || settings.mode === "force" || guard) {
+      if (settings.mode === "pass" || settings.mode === "force" || local) {
         this.report({ result: result.model === currentModel ? "kept" : "routed", model: result.model,
           effort: this.effectiveEffort(result.model, selectedEffort), reason: result.reason }, requestId);
       }

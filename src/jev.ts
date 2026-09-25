@@ -1,4 +1,5 @@
 import type { RouteChoice, RouteQuery, Tier } from "./types.js";
+import { MAX_CLASSIFIER_PROMPT_CHARS } from "./policy.js";
 
 export type JevOptions = {
   apiKey?: string;
@@ -16,14 +17,14 @@ export async function askJev(query: RouteQuery, options: JevOptions = {}): Promi
   const request = {
     model: "jev-latest",
     state: {
-      user_turn: query.prompt.slice(0, 1600),
+      user_turn: query.prompt.slice(0, MAX_CLASSIFIER_PROMPT_CHARS),
       approximate_context_tokens: query.contextTokens,
       current_model: query.currentModel,
     },
     questions: {
       tier: {
         type: "choice",
-        instructions: "Choose the least expensive model tier that can reliably complete this user turn. Assess the requested work, not the length of the message. If context is insufficient to judge, choose balanced.",
+        instructions: "Choose the least expensive model tier that can reliably complete this user turn. Assess the current requested work. Conversation length and the previous model are not evidence of task difficulty. Use strong only when the current task clearly requires it. If context is insufficient to judge, choose balanced.",
         criteria: {
           fast: "Simple formatting, direct facts, small unambiguous edits, or routine replies with low risk.",
           balanced: "Typical coding, writing, analysis, and multi-step tasks requiring sound judgment.",

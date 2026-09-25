@@ -1,5 +1,5 @@
 import { askJev } from "./jev.js";
-import { routingGuard, defaultSettings } from "./policy.js";
+import { routingGuard } from "./policy.js";
 import { writeMetric } from "./metrics.js";
 import type { DecisionEvent, RouteChoice, RouteQuery } from "./types.js";
 
@@ -12,7 +12,8 @@ export async function observeClaudePrompt(
 ): Promise<DecisionEvent | null> {
   if (input.hook_event_name !== "UserPromptSubmit" || typeof input.prompt !== "string") return null;
   const query = { prompt: input.prompt, currentModel: "claude-current", contextTokens: 0 };
-  const guard = routingGuard(query, defaultSettings("shadow"));
+  // The legacy observer retains Claude's existing short-prompt behavior.
+  const guard = input.prompt.trim().length < 12 ? "short-follow-up" : routingGuard(query);
   const started = Date.now();
   let event: DecisionEvent;
   if (guard) {
