@@ -10,6 +10,7 @@ import { readLoginKeychainPassword } from "./keychain.js";
 import { writeMetric } from "./metrics.js";
 import { defaultSettings } from "./policy.js";
 import { readMetricsFile } from "./report.js";
+import { readPriceTable } from "./pricing.js";
 import { evaluateCases, readEvaluationCases } from "./evaluate.js";
 import { compareRuns, readComparisonInput } from "./compare.js";
 import { askSearchJev, searchGate, type SearchInput } from "./search-gate.js";
@@ -172,7 +173,7 @@ function help(): void {
     `  jao codex [router options] -- [codex arguments]\n` +
     `  jao serve [router options]  (for Codex desktop; default port 8765; /status with --metrics)\n` +
     `  jao claude-shadow-hook --metrics FILE [--keychain-service NAME --keychain-account USER]\n` +
-    `  jao report FILE\n\n` +
+    `  jao report FILE [--prices PRICES.json]  (agent cost and savings estimate from your price table)\n\n` +
     `  jao compare FILE  (paired fixed and auto results; no model calls)\n` +
     `  jao search FILE|- [--metrics FILE]  (search-result decision; up to two paid Jev calls)\n` +
     `  jao search-report FILE\n` +
@@ -200,8 +201,12 @@ async function main(): Promise<void> {
     return;
   }
   if (command === "report") {
-    if (!args[0]) throw new Error("metrics file required");
-    process.stdout.write(`${JSON.stringify(readMetricsFile(args[0]), null, 2)}\n`);
+    if (!args[0] || !(args.length === 1 || (args.length === 3 && args[1] === "--prices" && args[2]))) {
+      throw new Error("usage: jao report FILE [--prices PRICES.json]");
+    }
+    const summary = readMetricsFile(args[0], args[2] ? readPriceTable(args[2]) : undefined);
+    for (const warning of summary.warnings) process.stderr.write(`[jao] warning: ${warning}\n`);
+    process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
     return;
   }
   if (command === "compare") {

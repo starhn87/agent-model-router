@@ -45,3 +45,33 @@ test("task summary includes tool calls and reports only observed spans", () => {
   assert.equal(tasks.p50RequestDurationMs, 100);
   assert.equal(tasks.p95ObservedSpanMs, 250);
 });
+
+test("a price table estimates agent cost per served model and against the reference model", () => {
+  const prices = { schemaVersion: 1 as const, referenceModel: "strong", models: {
+    fast: { inputUsdPerMillion: 1, cachedInputUsdPerMillion: 0.1, outputUsdPerMillion: 10 },
+    strong: { inputUsdPerMillion: 10, cachedInputUsdPerMillion: 1, outputUsdPerMillion: 100 },
+  } };
+  const input = [
+    { client: "claude", kind: "response", requestedModel: "fast", servedModel: "fast-20251001",
+      inputTokens: 1_000_000, cachedInputTokens: 500_000, outputTokens: 100_000 },
+    { client: "codex", kind: "response", requestedModel: "other", servedModel: "other", inputTokens: 10, outputTokens: 1 },
+  ].map((event) => JSON.stringify(event)).join("\n");
+  const cost = summarizeMetrics(input, undefined, prices).agentCost!;
+  assert.ok(Math.abs(cost.estimatedUsd - 1.55) < 1e-9);
+  assert.ok(Math.abs(cost.referenceUsd! - 15.5) < 1e-9);
+  assert.ok(Math.abs(cost.estimatedSavingsPercent! - 90) < 1e-9);
+  assert.equal(cost.unpricedResponses, 1);
+  assert.equal(cost.byModel.other!.usd, null);
+  assert.equal(summarizeMetrics(input).agentCost, undefined);
+});
+
+test("a high Jev error rate is reported as a warning once enough calls were attempted", () => {
+  const line = (result: string) => JSON.stringify({ client: "codex", result, latencyMs: 100 });
+  const failing = [...Array(3).fill(line("error")), ...Array(7).fill(line("routed")),
+    JSON.stringify({ client: "codex", result: "kept", reason: "simple-turn" })].join("\n");
+  const summary = summarizeMetrics(failing);
+  assert.equal(summary.jevAttempts, 10);
+  assert.equal(summary.jevErrorRate, 0.3);
+  assert.equal(summary.warnings.length, 1);
+  assert.deepEqual(summarizeMetrics([line("error"), line("routed")].join("\n")).warnings, []);
+});

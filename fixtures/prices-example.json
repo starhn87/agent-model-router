@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "referenceModel": "gpt-6-astra",
+  "models": {
+    "gpt-6-luna": { "inputUsdPerMillion": 0.5, "cachedInputUsdPerMillion": 0.05, "outputUsdPerMillion": 4 },
+    "gpt-6-sol": { "inputUsdPerMillion": 2, "cachedInputUsdPerMillion": 0.2, "outputUsdPerMillion": 16 },
+    "gpt-6-astra": { "inputUsdPerMillion": 10, "cachedInputUsdPerMillion": 1, "outputUsdPerMillion": 80 }
+  }
+}

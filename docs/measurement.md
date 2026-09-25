@@ -9,6 +9,18 @@ node dist/cli.js report .local/codex-persistent.jsonl
 
 `p50/p95RequestDurationMs`는 프록시가 요청을 받기 시작한 때부터 완료 메타데이터를 관찰할 때까지의 시간입니다. `p50/p95ObservedSpanMs`는 첫 판정 기록부터 마지막으로 관찰한 완료 응답까지의 간격으로, 실제 작업 완료 시간의 **하한**입니다. 작업 사이의 중단, 사용자의 확인 시간, 품질과 재시도 여부는 측정하지 않습니다. `estimatedJevUsd`는 Jev 입력 비용만이며 에이전트 모델의 청구 비용이 아닙니다.
 
+## 에이전트 모델 비용 추정
+
+`--prices`에 모델별 100만 토큰당 단가 파일을 주면 `agentCost`에 실제 응답 모델별 추정 비용과, 같은 토큰을 `referenceModel` 단가로 계산한 값 및 차이를 표시합니다. 단가는 이 프로젝트가 제공하지 않으므로 계정의 실제 요금으로 직접 채우세요. 예제 파일의 숫자는 합성값입니다. 기준 모델이 실제로 같은 토큰을 썼을 거라는 가정이므로 `estimatedSavingsUsd`는 추정치이며 청구 비용 비교를 대신하지 않습니다. 단가가 없는 모델의 응답은 `unpricedResponses`로 따로 셉니다. 날짜가 붙은 스냅샷(`…-20251001`)은 기본 모델 단가를 사용합니다.
+
+```bash
+cp fixtures/prices-example.json .local/prices.json
+node dist/cli.js report .local/codex-persistent.jsonl --prices .local/prices.json
+node dist/cli.js report .local/claude.jsonl --prices .local/prices.json
+```
+
+`jevErrorRate`는 Jev를 호출한 판정 중 실패 비율입니다. 10회 이상 호출에서 20% 이상 실패하면 `warnings`와 표준 오류에 경고를 출력합니다. 실패한 턴은 balanced 모델로 돌아가므로 절감 효과가 줄어듭니다.
+
 정책 비교는 동일한 라벨 작업 묶음을 고정 모델과 자동 정책으로 각각 실행해 완료 여부, 품질, 사람의 재수정 횟수, 전체 경과 시간, 실제 청구 비용을 함께 기록해야 합니다. 현재 로그 하나만으로는 다른 모델을 사용했을 때의 결과나 절감률을 알 수 없습니다. 자동 정책의 캐시 사용률과 도구 요청 수를 먼저 관찰하고, 비교 실행 결과가 쌓인 뒤 캐시를 고려한 라우팅이나 검색 단계를 조정합니다.
 
 비교 결과를 기록할 때는 예제 파일을 복사하고 같은 `id`의 `fixed`·`auto`에 각각 **실측값**을 입력하세요. `elapsedMs`는 작업 시작부터 검증까지 걸린 전체 시간, `billedUsd`는 실제 청구액, `qualityScore`는 실행 정책을 모르는 검토자가 매긴 0~5점입니다. `manualCorrections`는 사람이 추가로 수정한 횟수입니다. 작업별 청구액을 알 수 없으면 `billedUsd`를 `null`로 두세요. 이때 비용 비교도 `null`로 표시됩니다. 프롬프트와 결과 본문은 파일에 넣을 수 없습니다.

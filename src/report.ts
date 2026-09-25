@@ -1,5 +1,10 @@
 import { readFileSync } from "node:fs";
+import { agentCost, type AgentCost, type PriceTable, type TokenUsage } from "./pricing.js";
 import type { MetricsEvent, Tier } from "./types.js";
+
+// Below this many Jev attempts an error rate is too noisy to warn about.
+const MIN_ATTEMPTS_FOR_WARNING = 10;
+const ERROR_RATE_WARNING = 0.2;
 
 export type MetricsSummary = {
   total: number;
@@ -11,6 +16,11 @@ export type MetricsSummary = {
   p95JevLatencyMs: number | null;
   jevInputTokens: number;
   estimatedJevUsd: number;
+  jevAttempts: number;
+  jevErrors: number;
+  jevErrorRate: number | null;
+  warnings: string[];
+  agentCost?: AgentCost;
   observedResponses: number;
   differentModelIds: number;
   observedInputTokens: number;
@@ -38,7 +48,7 @@ function percentile(values: number[], fraction: number): number | null {
   return values[Math.ceil(values.length * fraction) - 1] ?? null;
 }
 
-export function summarizeMetrics(text: string, usdPerMillionInputTokens = 0.042): MetricsSummary {
+export function summarizeMetrics(text: string, usdPerMillionInputTokens = 0.042, prices?: PriceTable): MetricsSummary {
   const events = text.split("\n").flatMap((line) => {
     if (!line.trim()) return [];
     try { return [JSON.parse(line) as MetricsEvent]; } catch { return []; }
@@ -55,6 +65,9 @@ export function summarizeMetrics(text: string, usdPerMillionInputTokens = 0.042)
   let cachedInputTokens = 0;
   let observedOutputTokens = 0;
   let decisions = 0;
+  let jevAttempts = 0;
+  let jevErrors = 0;
+  const usages: TokenUsage[] = [];
   type TaskRecord = { startedAt?: number; lastResponseAt?: number; decisionRequests: Set<string>; responseRequests: string[];
     responses: number; input: number; cached: number; output: number };
   const tasks = new Map<string, TaskRecord>();
@@ -67,6 +80,7 @@ export function summarizeMetrics(text: string, usdPerMillionInputTokens = 0.042)
     })()) : undefined;
     if ("kind" in event) {
       observedResponses += 1;
+      usages.push(event);
       if (event.requestedModel !== event.servedModel) differentModelIds += 1;
       observedInputTokens += event.inputTokens ?? 0;
       cachedInputTokens += event.cachedInputTokens ?? 0;
@@ -96,9 +110,16 @@ export function summarizeMetrics(text: string, usdPerMillionInputTokens = 0.042)
     if (event.effort) byEffort[event.effort] = (byEffort[event.effort] ?? 0) + 1;
     if (event.recommendedTier && event.recommendedTier in recommendations) recommendations[event.recommendedTier] += 1;
     if (typeof event.latencyMs === "number") latencies.push(event.latencyMs);
+    // Local routes carry no latency; every Jev call, answered or failed, does.
+    if (typeof event.latencyMs === "number" || event.result === "error") jevAttempts += 1;
+    if (event.result === "error") jevErrors += 1;
     if (typeof event.jevInputTokens === "number") jevInputTokens += event.jevInputTokens;
   }
   latencies.sort((a, b) => a - b);
+  const jevErrorRate = jevAttempts ? jevErrors / jevAttempts : null;
+  const warnings = jevErrorRate !== null && jevAttempts >= MIN_ATTEMPTS_FOR_WARNING && jevErrorRate >= ERROR_RATE_WARNING
+    ? [`Jev failed ${jevErrors} of ${jevAttempts} calls (${Math.round(jevErrorRate * 100)}%); those turns fell back to the balanced model, so routing savings are reduced.`]
+    : [];
   const tracked = [...tasks.values()];
   const spans = tracked.flatMap((task) => task.startedAt !== undefined && task.lastResponseAt !== undefined && task.lastResponseAt >= task.startedAt
     ? [task.lastResponseAt - task.startedAt] : []);
@@ -108,6 +129,8 @@ export function summarizeMetrics(text: string, usdPerMillionInputTokens = 0.042)
     p95JevLatencyMs: latencies.length ? latencies[Math.ceil(latencies.length * 0.95) - 1] ?? null : null,
     jevInputTokens,
     estimatedJevUsd: jevInputTokens * usdPerMillionInputTokens / 1_000_000,
+    jevAttempts, jevErrors, jevErrorRate, warnings,
+    ...(prices ? { agentCost: agentCost(prices, usages) } : {}),
     observedResponses, differentModelIds, observedInputTokens, cachedInputTokens, observedOutputTokens,
     observedCacheReadRate: observedInputTokens ? cachedInputTokens / observedInputTokens : null,
     tasks: {
@@ -126,6 +149,6 @@ export function summarizeMetrics(text: string, usdPerMillionInputTokens = 0.042)
   };
 }
 
-export function readMetricsFile(path: string, usdPerMillionInputTokens?: number): MetricsSummary {
-  return summarizeMetrics(readFileSync(path, "utf8"), usdPerMillionInputTokens);
+export function readMetricsFile(path: string, prices?: PriceTable): MetricsSummary {
+  return summarizeMetrics(readFileSync(path, "utf8"), undefined, prices);
 }
