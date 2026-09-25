@@ -6,6 +6,7 @@ import { askJev } from "./jev.js";
 import { codexSessionKey, estimateContextTokens, latestUserTurn, type CodexBody } from "./codex-request.js";
 import { CodexResponseObserver, type ObservedResponse } from "./codex-response.js";
 import { chooseModel, effortFromScore, fallbackModel, routingGuard } from "./policy.js";
+import { readRecentStatus, renderStatusPage } from "./status.js";
 import type { DecisionEvent, ResponseObservationEvent, RouteChoice, RouteQuery, RouteResult, RouterSettings } from "./types.js";
 
 const CHATGPT_CODEX_URL = "https://chatgpt.com/backend-api/codex";
@@ -15,6 +16,7 @@ const MAX_CATALOG_BYTES = 4 * 1024 * 1024;
 export type ProxyOptions = {
   settings: RouterSettings;
   port?: number;
+  statusFile?: string;
   upstreamBaseUrl?: string;
   classify?: (query: RouteQuery) => Promise<RouteChoice>;
   onDecision?: (event: DecisionEvent) => void;
@@ -83,7 +85,11 @@ export class CodexRouter {
     for (const model of models) {
       if (typeof model.slug === "string" && model.supported_in_api !== false) this.catalog.set(model.slug, model);
     }
-    return payload;
+    if (this.options.settings.mode !== "auto") return payload;
+    return { ...payload, models: payload.models.map((model) =>
+      isRecord(model) && model.slug === this.options.settings.baselineModel
+        ? { ...model, display_name: "Jev Auto", description: "Routes each turn using TypeSafe Jev; this entry uses a supported model ID." }
+        : model) };
   }
 
   private effectiveEffort(model: string, requested: string | undefined): string | undefined {
@@ -199,12 +205,20 @@ function respondError(response: ServerResponse, status: number, message: string)
   response.end(JSON.stringify({ error: { type: "agent_router_error", message } }));
 }
 
-async function handleRequest(request: IncomingMessage, response: ServerResponse, router: CodexRouter, upstreamBaseUrl: string): Promise<void> {
+async function handleRequest(request: IncomingMessage, response: ServerResponse, router: CodexRouter,
+  upstreamBaseUrl: string, statusFile?: string): Promise<void> {
   const rawPath = request.url ?? "/";
   if (!rawPath.startsWith("/") || rawPath.startsWith("//")) return respondError(response, 400, "invalid path");
   if (request.method === "GET" && rawPath === "/health") {
     response.writeHead(200, { "content-type": "application/json" });
     response.end('{"status":"ok"}');
+    return;
+  }
+  if (request.method === "GET" && (rawPath === "/status" || rawPath === "/status.json")) {
+    const entries = statusFile ? readRecentStatus(statusFile) : [];
+    response.writeHead(200, { "content-type": rawPath === "/status" ? "text/html; charset=utf-8" : "application/json; charset=utf-8",
+      "cache-control": "no-store", "x-content-type-options": "nosniff" });
+    response.end(rawPath === "/status" ? renderStatusPage(entries, Boolean(statusFile)) : JSON.stringify({ entries }));
     return;
   }
 
@@ -301,7 +315,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
 export async function startCodexProxy(options: ProxyOptions): Promise<{ port: number; close: () => Promise<void> }> {
   const router = new CodexRouter(options);
   const server = http.createServer((request, response) => {
-    void handleRequest(request, response, router, options.upstreamBaseUrl ?? CHATGPT_CODEX_URL).catch(() => {
+    void handleRequest(request, response, router, options.upstreamBaseUrl ?? CHATGPT_CODEX_URL, options.statusFile).catch(() => {
       respondError(response, 502, "proxy unavailable");
     });
   });

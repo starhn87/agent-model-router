@@ -87,6 +87,7 @@ async function runCodex(parsed: Parsed): Promise<void> {
   const command = resolveCodex();
   const classify = parsed.settings.mode === "pass" || parsed.settings.mode === "force" ? undefined : await keychainClassifier(spec);
   const proxy = await startCodexProxy({ settings: parsed.settings, classify,
+    statusFile: parsed.metricsFile,
     onDecision: (event) => writeMetric(event, parsed.metricsFile), onObservation: (event) => writeMetric(event, parsed.metricsFile) });
   const baseUrl = `http://127.0.0.1:${proxy.port}`;
   if (parsed.settings.mode === "auto" && !spec && !process.env.TYPESAFE_API_KEY && !process.env.JEV_API_KEY) {
@@ -107,6 +108,7 @@ async function runServer(parsed: Parsed): Promise<void> {
   const spec = keychainSpec(parsed.keychainService, parsed.keychainAccount);
   const classify = parsed.settings.mode === "pass" || parsed.settings.mode === "force" ? undefined : await keychainClassifier(spec);
   const proxy = await startCodexProxy({ settings: parsed.settings, port: parsed.port ?? 8765,
+    statusFile: parsed.metricsFile,
     classify, onDecision: (event) => writeMetric(event, parsed.metricsFile), onObservation: (event) => writeMetric(event, parsed.metricsFile) });
   process.stdout.write(`Agent Model Router listening on http://127.0.0.1:${proxy.port}\n`);
   await new Promise<void>((resolve) => {
@@ -151,7 +153,7 @@ function help(): void {
     `         For a local .env file, run: node --env-file=.env dist/cli.js ...\n` +
     `         macOS login Keychain is optional via the flags below.\n\n` +
     `  amr codex [router options] -- [codex arguments]\n` +
-    `  amr serve [router options]  (for Codex desktop; default port 8765)\n` +
+    `  amr serve [router options]  (for Codex desktop; default port 8765; /status with --metrics)\n` +
     `  amr claude-shadow-hook --metrics FILE [--keychain-service NAME --keychain-account USER]\n` +
     `  amr report FILE\n\n` +
     `  amr evaluate FILE --max-calls N [--keychain-service NAME --keychain-account USER]  (paid Jev calls)\n\n` +

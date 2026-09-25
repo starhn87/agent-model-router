@@ -59,6 +59,14 @@ test("force mode forwards ChatGPT headers, keeps the real model catalog, and pre
   assert.equal(JSON.parse(requests[1]?.body ?? "{}").reasoning.effort, "medium");
 });
 
+test("auto mode labels the supported baseline model without adding an unsupported alias", () => {
+  const router = new CodexRouter({ settings: defaultSettings("auto") });
+  const models = router.ingestCatalog(catalog) as typeof catalog;
+  assert.deepEqual(models.models.map((model) => model.slug), catalog.models.map((model) => model.slug));
+  assert.equal(models.models.find((model) => model.slug === "gpt-6-sol")?.display_name, "Jev Auto");
+  assert.equal(catalog.models.find((model) => model.slug === "gpt-6-sol")?.display_name, "Sol");
+});
+
 test("auto mode classifies each new turn once and pins tool continuations", async () => {
   let calls = 0;
   const router = new CodexRouter({ settings: defaultSettings("auto"), classify: async () => {
